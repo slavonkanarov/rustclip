@@ -1,6 +1,12 @@
 # Technical notes
 
-These are implementation guidelines for Windows, not an approved choice of libraries or APIs.
+These are implementation guidelines for Windows. The UI must use native Windows components without WebView or an embedded browser.
+
+## Current implementation slice
+
+The prototype uses the `windows` crate for Win32 clipboard notifications, a native listbox, a tray icon, and a global shortcut. A worker thread reads text and writes one UTF-8 file per entry under `%LOCALAPPDATA%\rustclip\history`; temporary files are renamed after syncing so interrupted writes are ignored on restart. The fixed initial accounting cap is 64 MiB (UTF-8 text bytes plus 64 bytes per entry), with an 8 MiB per-text-entry cap. This does not yet measure actual filesystem allocation. The listbox currently shows at most the newest 1,000 entries. These are provisional implementation values, not final settings defaults.
+
+The current sequence-number check suppresses rustclip's own text restoration and treats a later external copy of identical text as a new event. Clipboard changes that are superseded before the worker reads them cannot be reconstructed from Windows' current clipboard state; rapid-copy behavior still needs Windows testing and refinement. The prototype has not yet implemented images, search, quick selection, configurable bindings, application identity, or paste into the original window.
 
 ## Data flow
 
@@ -33,6 +39,8 @@ Comparing text, image data, or hashes alone is insufficient: a user may copy the
 ## Windows integration and keyboard commands
 
 Separate components handle the clipboard, global shortcut registration, active-window detection, display above other windows, and paste. This allows Windows behavior to be validated independently of history and UI logic.
+
+Keep a message window alive while the application runs in the tray. Closing the main window should hide it; explicit Exit should remove the tray icon, unregister hotkeys and clipboard listeners, and terminate the message loop. Native Win32 controls are suitable for an initial implementation, but the requirements do not mandate a particular Rust wrapper.
 
 Capture the original window before showing the preview. Before automatic paste, confirm the window still exists and that the action cannot be directed into rustclip. If it is unsafe to restore focus or paste, leave the selected data on the clipboard. Check all keyboard bindings for internal conflicts before saving settings; show global shortcut registration errors to the user.
 

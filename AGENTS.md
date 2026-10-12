@@ -2,9 +2,9 @@
 
 ## Project status
 
-- This repository is in the planning stage. It currently contains documentation only; do not describe planned features as implemented.
-- [docs/requirements.md](docs/requirements.md) is the source of product requirements. [docs/technical-notes.md](docs/technical-notes.md) contains implementation guidance, not approved library choices.
-- Do not create a Cargo project or application code without a separate implementation request. This describes the current stage and does not restrict future work requested by the owner.
+- The owner requested implementation. This repository now contains an initial Windows prototype; describe only features present in the code as implemented.
+- [docs/requirements.md](docs/requirements.md) is the source of product requirements. [docs/technical-notes.md](docs/technical-notes.md) contains implementation guidance.
+- The prototype uses native Win32 controls. Do not add WebView, an embedded browser, or a browser-based UI framework.
 
 ## Language policy
 
@@ -25,4 +25,4 @@
 
 - Update requirements, acceptance scenarios, and technical notes when behavior changes.
 - Check rapid copies, self-initiated clipboard writes, identical content copied externally, large images, malformed formats, and closure of the original window.
-- Preserve unrelated files and user changes. At this stage, check documentation links and consistency; there are no build commands yet.
+- Preserve unrelated files and user changes. Check documentation links and consistency, run Cargo tests, and check the Windows target when changing code.

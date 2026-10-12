@@ -4,9 +4,17 @@
 
 rustclip is a local Rust application for Windows that saves clipboard history and lets users quickly paste previously copied text and images. Predictable, responsive operation in the background and during invocation is the main quality goal.
 
-The first release includes persistent history, a searchable main window, a compact selection preview above other windows, configurable keyboard commands, a storage size limit, and active window and application detection. Per-application rules, including ignoring an application, are planned for later; the design must allow them to be added.
+The first release includes persistent history, a searchable main window, a compact selection preview above other windows, configurable keyboard commands, a storage size limit, active window and application detection, and a system tray icon. Per-application rules, including ignoring an application, are planned for later; the design must allow them to be added.
+
+The desktop interface must use native Windows UI components. WebView, embedded browsers, and browser-based UI frameworks are not allowed.
 
 ## Behavior
+
+### Background operation and system tray
+
+- The application runs in the background with a visible system tray icon. Closing the main window hides it without stopping clipboard capture.
+- The tray menu opens the main window and provides an explicit Exit action. Exiting removes the tray icon and releases Windows registrations.
+- Tray controls and all other application windows use native Windows UI components; no WebView or embedded browser is created.
 
 ### Clipboard history
 
@@ -54,6 +62,7 @@ The first release includes persistent history, a searchable main window, a compa
 7. Every keyboard command can be rebound; conflicts and global shortcut registration failures are reported clearly.
 8. Quick selection identifies the original window. Paste reaches that window, or the entry safely remains only on the clipboard if the window is unavailable.
 9. All visible application text and all project documentation are in English; communication with the project owner remains in Russian.
+10. The application remains available in the system tray when the main window is closed. The tray menu opens history and exits cleanly, and no WebView or embedded browser is used.
 
 ## Open decisions
 
