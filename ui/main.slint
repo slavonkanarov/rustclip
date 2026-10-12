@@ -1,0 +1,384 @@
+import { Button, CheckBox, LineEdit, ListView, TextEdit } from "std-widgets.slint";
+
+export struct ClipRow {
+    preview: string,
+    kind: string,
+    thumbnail: image,
+    selected: bool,
+}
+
+export struct ShortcutRow {
+    name: string,
+    scope: string,
+    key: string,
+    combo: string,
+    win: bool,
+    ctrl: bool,
+    alt: bool,
+    shift: bool,
+    capturing: bool,
+}
+
+export struct TemplateRow {
+    name: string,
+    detail: string,
+    depth: int,
+    folder: bool,
+    collapsed: bool,
+    selected: bool,
+}
+
+component MenuChoice inherits Rectangle {
+    in property <string> title;
+    in property <bool> active;
+    callback activated();
+    background: active ? #45305a : transparent;
+    Text {
+        x: 8px; width: parent.width - 16px; height: parent.height;
+        text: root.title; color: #e8e4ed; font-size: 13px; vertical-alignment: center;
+    }
+    TouchArea { clicked => { root.activated(); } }
+}
+
+component MenuCommand inherits Rectangle {
+    in property <string> title;
+    in property <bool> can-activate: true;
+    callback activated();
+    height: 29px;
+    background: root.can-activate && touch.has-hover ? #45305a : transparent;
+    Text {
+        x: 12px; width: parent.width - 24px; height: parent.height;
+        text: root.title; color: root.can-activate ? #e8e4ed : #777b84; font-size: 13px; vertical-alignment: center;
+    }
+    touch := TouchArea { enabled: root.can-activate; clicked => { root.activated(); } }
+}
+
+component ToolAction inherits Rectangle {
+    in property <string> glyph;
+    in property <image> icon;
+    in property <string> hint;
+    in property <bool> can-activate: true;
+    callback activated();
+    border-radius: 4px;
+    background: !can-activate ? #20242b : (touch.has-hover ? #4a355d : #2b3039);
+    border-width: 1px;
+    border-color: #424750;
+    if root.icon.width > 0: Image {
+        x: (parent.width - 22px) / 2; y: (parent.height - 22px) / 2;
+        width: 22px; height: 22px; source: root.icon; image-fit: contain;
+        opacity: root.can-activate ? 1 : 0.4;
+    }
+    if root.icon.width == 0: Text {
+        y: 1px; width: parent.width; height: parent.height - 2px;
+        text: root.glyph; color: root.can-activate ? #e8d6ff : #70757f;
+        font-size: 22px; horizontal-alignment: center; vertical-alignment: center;
+    }
+    touch := TouchArea { enabled: root.can-activate; clicked => { root.activated(); } }
+}
+
+component TreeChoice inherits Rectangle {
+    in property <string> title;
+    in property <int> depth;
+    in property <bool> active;
+    callback activated();
+    height: 29px;
+    background: active ? #285887 : (touch.has-hover ? #30323c : transparent);
+    Text {
+        x: 11px + root.depth * 16px; width: parent.width - self.x - 7px; height: parent.height;
+        text: root.title; color: active ? #ffffff : #d4d2da;
+        font-size: 13px; vertical-alignment: center;
+    }
+    touch := TouchArea { clicked => { root.activated(); } }
+}
+
+export component MainWindow inherits Window {
+    title: root.settings-open ? "rustclip — Settings" : "rustclip";
+    preferred-width: 1020px;
+    preferred-height: 750px;
+    min-width: 760px;
+    min-height: 520px;
+    background: #15191f;
+
+    in-out property <[ClipRow]> clips;
+    in-out property <[ShortcutRow]> shortcuts;
+    in-out property <[TemplateRow]> template-rows;
+    in-out property <int> page: 0;
+    in-out property <bool> settings-open: false;
+    in-out property <bool> template-editor-open: false;
+    in-out property <int> menu-open: 0;
+    in-out property <int> selected-shortcut: 0;
+    in-out property <string> search-text;
+    in-out property <string> status-text: "Ready";
+    in-out property <bool> has-selection: false;
+    in-out property <bool> saving: false;
+    in-out property <int> template-kind: 0;
+    in-out property <string> template-name;
+    in-out property <string> template-content;
+    in-out property <string> template-search;
+    in-out property <int> settings-section: 0;
+    in-out property <bool> start-hidden: true;
+    in-out property <bool> start-with-windows: false;
+    in-out property <bool> paste-enabled: true;
+    in-out property <bool> restore-clipboard: false;
+    in-out property <string> paste-delay-text: "150";
+    in-out property <string> history-limit-text: "64";
+
+    callback open-history();
+    callback open-templates();
+    callback open-settings();
+    callback cancel-settings();
+    callback select-clip(int);
+    callback copy-selected();
+    callback paste-selected();
+    callback delete-selected();
+    callback navigate-clip(int);
+    callback clear-history();
+    callback search-changed();
+    callback toggle-modifier(int, int, bool);
+    callback capture-key(int);
+    callback save-settings();
+    callback reset-settings();
+    callback exit-app();
+    callback select-template(int);
+    callback toggle-template-group(int);
+    callback new-template-group();
+    callback new-template();
+    callback save-template();
+    callback delete-template();
+    callback copy-template();
+    callback paste-template();
+    callback cancel-template-edit();
+    callback template-search-changed();
+    callback handle-key(string, bool, bool, bool, bool) -> bool;
+    public function focus-search() { search-input.focus(); }
+
+    forward-focus: key-scope;
+    key-scope := FocusScope {
+        width: parent.width; height: parent.height;
+        capture-key-pressed(event) => {
+            if (root.handle-key(event.text, event.modifiers.control, event.modifiers.alt, event.modifiers.shift, event.modifiers.meta)) { accept } else { reject }
+        }
+
+        Rectangle { width: parent.width; height: 29px; background: #20232b; }
+        MenuChoice { x: 8px; width: 44px; height: 29px; title: "File"; active: root.menu-open == 1; activated => { root.menu-open = root.menu-open == 1 ? 0 : 1; } }
+        MenuChoice { x: 53px; width: 44px; height: 29px; title: "Clip"; active: root.menu-open == 2; activated => { root.menu-open = root.menu-open == 2 ? 0 : 2; } }
+        MenuChoice { x: 98px; width: 49px; height: 29px; title: "View"; active: root.menu-open == 3; activated => { root.menu-open = root.menu-open == 3 ? 0 : 3; } }
+        MenuChoice { x: 148px; width: 88px; height: 29px; title: "Shortcuts"; active: root.menu-open == 4; activated => { root.menu-open = root.menu-open == 4 ? 0 : 4; } }
+        MenuChoice { x: 237px; width: 48px; height: 29px; title: "Help"; active: root.menu-open == 5; activated => { root.menu-open = root.menu-open == 5 ? 0 : 5; } }
+        Rectangle { y: 29px; width: parent.width; height: 48px; background: #252a32; }
+        Rectangle { y: 76px; width: parent.width; height: 1px; background: #4a4e58; }
+
+        if root.page == 0: Rectangle {
+            y: 35px; x: 9px; width: 306px; height: 37px; background: transparent;
+            ToolAction { x: 0px; width: 36px; height: 36px; icon: @image-url("../assets/icons/copy.svg"); hint: "Copy"; can-activate: root.has-selection; activated => { root.copy-selected(); } }
+            ToolAction { x: 42px; width: 36px; height: 36px; icon: @image-url("../assets/icons/paste.svg"); hint: "Paste"; can-activate: root.has-selection && root.paste-enabled; activated => { root.paste-selected(); } }
+            Rectangle { x: 85px; y: 3px; width: 1px; height: 30px; background: #50545e; }
+            ToolAction { x: 93px; width: 36px; height: 36px; icon: @image-url("../assets/icons/up.svg"); hint: "Previous"; can-activate: root.has-selection; activated => { root.navigate-clip(-1); } }
+            ToolAction { x: 135px; width: 36px; height: 36px; icon: @image-url("../assets/icons/down.svg"); hint: "Next"; can-activate: root.has-selection; activated => { root.navigate-clip(1); } }
+            Rectangle { x: 178px; y: 3px; width: 1px; height: 30px; background: #50545e; }
+            ToolAction { x: 186px; width: 36px; height: 36px; icon: @image-url("../assets/icons/delete.svg"); hint: "Delete"; can-activate: root.has-selection; activated => { root.delete-selected(); } }
+            ToolAction { x: 228px; width: 36px; height: 36px; icon: @image-url("../assets/icons/clear.svg"); hint: "Clear history"; activated => { root.clear-history(); } }
+        }
+        if root.page == 1: Rectangle {
+            y: 35px; x: 9px; width: 350px; height: 37px; background: transparent;
+            ToolAction { x: 0px; width: 36px; height: 36px; icon: @image-url("../assets/icons/folder_add.svg"); hint: "New group"; activated => { root.new-template-group(); } }
+            ToolAction { x: 42px; width: 36px; height: 36px; icon: @image-url("../assets/icons/file_add.svg"); hint: "New template"; can-activate: root.template-kind != 0; activated => { root.new-template(); } }
+            ToolAction { x: 84px; width: 36px; height: 36px; icon: @image-url("../assets/icons/edit.svg"); hint: "Edit"; can-activate: root.template-kind != 0; activated => { root.template-editor-open = true; } }
+            ToolAction { x: 126px; width: 36px; height: 36px; icon: @image-url("../assets/icons/delete.svg"); hint: "Delete"; can-activate: root.template-kind != 0; activated => { root.delete-template(); } }
+            Rectangle { x: 169px; y: 3px; width: 1px; height: 30px; background: #50545e; }
+            ToolAction { x: 177px; width: 36px; height: 36px; icon: @image-url("../assets/icons/copy.svg"); hint: "Copy"; can-activate: root.template-kind == 2; activated => { root.copy-template(); } }
+            ToolAction { x: 219px; width: 36px; height: 36px; icon: @image-url("../assets/icons/paste.svg"); hint: "Paste"; can-activate: root.template-kind == 2 && root.paste-enabled; activated => { root.paste-template(); } }
+        }
+        Rectangle { x: 8px; y: 83px; width: parent.width - 16px; height: 30px; background: #20242b; border-width: 1px; border-color: #464b55; }
+        Rectangle { x: 9px; y: 84px; width: 184px; height: 28px; background: root.page == 0 ? #34303e : transparent; }
+        Rectangle { x: 193px; y: 84px; width: 112px; height: 28px; background: root.page == 1 ? #34303e : transparent; }
+        Text { x: 17px; y: 84px; width: 168px; height: 28px; text: "Clipboard history"; color: root.page == 0 ? #f6e9ff : #aab0ba; font-size: 13px; vertical-alignment: center; }
+        Text { x: 202px; y: 84px; width: 98px; height: 28px; text: "Templates"; color: root.page == 1 ? #f6e9ff : #aab0ba; font-size: 13px; vertical-alignment: center; }
+        TouchArea { x: 9px; y: 84px; width: 184px; height: 28px; clicked => { root.open-history(); } }
+        TouchArea { x: 193px; y: 84px; width: 112px; height: 28px; clicked => { root.open-templates(); } }
+
+        Rectangle { x: 8px; y: 113px; width: parent.width - 16px; height: parent.height - 174px; background: #171b21; border-width: 1px; border-color: #50545e; }
+        if root.page == 0: ListView {
+            x: 10px; y: 115px; width: parent.width - 20px; height: parent.height - 178px;
+            for clip[index] in root.clips: Rectangle {
+                width: parent.width; height: 30px;
+                background: clip.selected ? #245f99 : (Math.mod(index, 2) == 0 ? #191d24 : #1d2229);
+                if clip.thumbnail.width > 0: Image { x: 6px; y: 3px; width: 24px; height: 24px; source: clip.thumbnail; image-fit: contain; }
+                if clip.thumbnail.width == 0: Text { x: 7px; y: 2px; width: 22px; height: 26px; text: clip.kind == "IMAGE CLIP" ? "▧" : "▤"; color: #c9a2ef; font-size: 19px; horizontal-alignment: center; vertical-alignment: center; }
+                Text { x: 38px; y: 2px; width: parent.width - 50px; height: 26px; text: clip.preview; color: clip.selected ? #ffffff : #e1e4e9; font-size: 13px; overflow: elide; vertical-alignment: center; }
+                Rectangle { y: 29px; width: parent.width; height: 1px; background: #272c34; }
+                TouchArea { clicked => { root.select-clip(index); } }
+            }
+        }
+        if root.page == 1: ListView {
+            x: 10px; y: 115px; width: parent.width - 20px; height: parent.height - 178px;
+            for row[index] in root.template-rows: Rectangle {
+                width: parent.width; height: 30px;
+                background: row.selected ? #245f99 : (Math.mod(index, 2) == 0 ? #191d24 : #1d2229);
+                Text { x: 8px + row.depth * 18px; y: 2px; width: 20px; height: 26px; text: row.folder ? (row.collapsed ? "▸" : "▾") : "▤"; color: #c9a2ef; font-size: 17px; horizontal-alignment: center; vertical-alignment: center; }
+                Text { x: 32px + row.depth * 18px; y: 2px; width: parent.width - self.x - 12px; height: 26px; text: row.name; color: row.selected ? #ffffff : #e1e4e9; font-size: 13px; vertical-alignment: center; overflow: elide; }
+                Rectangle { y: 29px; width: parent.width; height: 1px; background: #272c34; }
+                TouchArea { x: 31px + row.depth * 18px; width: parent.width - self.x; clicked => { root.select-template(index); } }
+                if row.folder: TouchArea { x: 8px + row.depth * 18px; width: 21px; clicked => { root.toggle-template-group(index); } }
+            }
+        }
+        if root.page == 0 && root.clips.length == 0: Text { x: 30px; y: 190px; width: parent.width - 60px; height: 35px; text: "No matching clips"; color: #959aa5; font-size: 14px; horizontal-alignment: center; }
+        if root.page == 1 && root.template-rows.length == 0: Text { x: 30px; y: 190px; width: parent.width - 60px; height: 35px; text: "No template groups yet. Use + to create one."; color: #959aa5; font-size: 14px; horizontal-alignment: center; }
+
+        Text { x: 11px; y: parent.height - 59px; width: parent.width - 22px; height: 20px; text: root.status-text; color: #9fa8b6; font-size: 11px; overflow: elide; vertical-alignment: center; }
+        Rectangle { x: 8px; y: parent.height - 37px; width: parent.width - 16px; height: 29px; background: #20242b; border-width: 1px; border-color: #555a64; }
+        search-input := LineEdit { x: 12px; y: parent.height - 34px; width: parent.width - 58px; height: 23px; visible: root.page == 0; text <=> root.search-text; placeholder-text: "Search history"; edited => { root.search-changed(); } }
+        LineEdit { x: 12px; y: parent.height - 34px; width: parent.width - 58px; height: 23px; visible: root.page == 1; text <=> root.template-search; placeholder-text: "Search templates"; edited => { root.template-search-changed(); } }
+        ToolAction { x: parent.width - 39px; y: parent.height - 34px; width: 24px; height: 23px; icon: @image-url("../assets/icons/search.svg"); hint: "Focus search"; activated => { root.focus-search(); } }
+
+        if root.menu-open != 0: TouchArea { y: 29px; width: parent.width; height: parent.height - 29px; clicked => { root.menu-open = 0; } }
+        if root.menu-open == 1: Rectangle { x: 8px; y: 29px; width: 190px; height: 91px; background: #252a32; border-width: 1px; border-color: #595460;
+            MenuCommand { y: 1px; width: parent.width - 2px; title: "Settings..."; activated => { root.menu-open = 0; root.open-settings(); } }
+            MenuCommand { y: 30px; width: parent.width - 2px; title: "Clear history"; activated => { root.menu-open = 0; root.clear-history(); } }
+            MenuCommand { y: 59px; width: parent.width - 2px; title: "Exit"; activated => { root.menu-open = 0; root.exit-app(); } }
+        }
+        if root.menu-open == 2: Rectangle { x: 53px; y: 29px; width: 190px; height: 91px; background: #252a32; border-width: 1px; border-color: #595460;
+            MenuCommand { y: 1px; width: parent.width - 2px; title: "Copy selected"; can-activate: root.page == 0 ? root.has-selection : root.template-kind == 2; activated => { root.menu-open = 0; if (root.page == 0) { root.copy-selected(); } else { root.copy-template(); } } }
+            MenuCommand { y: 30px; width: parent.width - 2px; title: "Paste selected"; can-activate: root.paste-enabled && (root.page == 0 ? root.has-selection : root.template-kind == 2); activated => { root.menu-open = 0; if (root.page == 0) { root.paste-selected(); } else { root.paste-template(); } } }
+            MenuCommand { y: 59px; width: parent.width - 2px; title: "Delete selected"; can-activate: root.page == 0 ? root.has-selection : root.template-kind != 0; activated => { root.menu-open = 0; if (root.page == 0) { root.delete-selected(); } else { root.delete-template(); } } }
+        }
+        if root.menu-open == 3: Rectangle { x: 98px; y: 29px; width: 180px; height: 62px; background: #252a32; border-width: 1px; border-color: #595460;
+            MenuCommand { y: 1px; width: parent.width - 2px; title: "Clipboard history"; activated => { root.menu-open = 0; root.open-history(); } }
+            MenuCommand { y: 30px; width: parent.width - 2px; title: "Templates"; activated => { root.menu-open = 0; root.open-templates(); } }
+        }
+        if root.menu-open == 4: Rectangle { x: 148px; y: 29px; width: 190px; height: 33px; background: #252a32; border-width: 1px; border-color: #595460;
+            MenuCommand { y: 1px; width: parent.width - 2px; title: "Configure shortcuts..."; activated => { root.menu-open = 0; root.settings-section = 1; root.open-settings(); } }
+        }
+        if root.menu-open == 5: Rectangle { x: 237px; y: 29px; width: 185px; height: 33px; background: #252a32; border-width: 1px; border-color: #595460;
+            MenuCommand { y: 1px; width: parent.width - 2px; title: "About rustclip"; activated => { root.menu-open = 0; root.status-text = "rustclip 0.1.0 · Local clipboard history"; } }
+        }
+
+        if root.template-editor-open: Rectangle {
+            width: parent.width; height: parent.height; background: #090b10cc;
+            TouchArea { clicked => {} }
+            Rectangle {
+                width: parent.width > 660px ? 620px : parent.width - 30px;
+                height: parent.height > 535px ? 470px : parent.height - 30px;
+                x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2;
+                background: #252931; border-width: 1px; border-color: #706078;
+                Rectangle { width: parent.width; height: 34px; background: #542470; }
+                Text { x: 12px; width: parent.width - 58px; height: 34px; text: root.template-kind == 1 ? "Edit group" : "Edit template"; color: #ffffff; font-size: 14px; vertical-alignment: center; }
+                ToolAction { x: parent.width - 31px; y: 5px; width: 24px; height: 24px; glyph: "×"; hint: "Close"; activated => { root.cancel-template-edit(); } }
+                Text { x: 20px; y: 55px; width: parent.width - 40px; height: 20px; text: "Name"; color: #dedfe4; font-size: 13px; }
+                LineEdit { x: 20px; y: 79px; width: parent.width - 40px; height: 33px; text <=> root.template-name; }
+                if root.template-kind == 2: Text { x: 20px; y: 127px; width: parent.width - 40px; height: 20px; text: "Content"; color: #dedfe4; font-size: 13px; }
+                if root.template-kind == 2: TextEdit { x: 20px; y: 152px; width: parent.width - 40px; height: parent.height - 222px; text <=> root.template-content; }
+                Rectangle { x: 0px; y: parent.height - 57px; width: parent.width; height: 1px; background: #454a54; }
+                Button { x: parent.width - 250px; y: parent.height - 47px; width: 70px; height: 31px; text: "Save"; clicked => { root.save-template(); } }
+                Button { x: parent.width - 170px; y: parent.height - 47px; width: 70px; height: 31px; text: "Copy"; enabled: root.template-kind == 2; clicked => { root.copy-template(); } }
+                Button { x: parent.width - 90px; y: parent.height - 47px; width: 70px; height: 31px; text: "Cancel"; clicked => { root.cancel-template-edit(); } }
+            }
+        }
+
+        if root.settings-open: Rectangle {
+            width: parent.width; height: parent.height; background: #080b11d0;
+            TouchArea { clicked => {} }
+            Rectangle {
+                width: parent.width > 850px ? 790px : parent.width - 28px;
+                height: parent.height > 660px ? 600px : parent.height - 24px;
+                x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2;
+                background: #23262d; border-width: 1px; border-color: #725d7c;
+                Rectangle { width: parent.width; height: 34px; background: #542470; }
+                Text { x: 12px; width: parent.width - 55px; height: 34px; text: "Settings"; color: #ffffff; font-size: 14px; vertical-alignment: center; }
+                ToolAction { x: parent.width - 31px; y: 5px; width: 24px; height: 24px; glyph: "×"; hint: "Close"; can-activate: !root.saving; activated => { root.cancel-settings(); } }
+                Rectangle { x: 10px; y: 44px; width: parent.width - 20px; height: 43px; background: #b9963e; }
+                Text { x: 20px; y: 44px; width: parent.width - 40px; height: 43px;
+                    text: root.settings-section == 0 ? "General" : root.settings-section == 1 ? "Keyboard shortcuts" : root.settings-section == 2 ? "Clipboard history" : root.settings-section == 3 ? "Templates" : root.settings-section == 4 ? "Appearance" : root.settings-section == 5 ? "Paste settings" : root.settings-section == 6 ? "Filtering" : "Additional";
+                    color: #21170f; font-size: 25px; horizontal-alignment: center; vertical-alignment: center;
+                }
+                Rectangle { x: 10px; y: 98px; width: 205px; height: parent.height - 157px; background: #1b1e25; border-width: 1px; border-color: #5a5c65;
+                    TreeChoice { x: 3px; y: 5px; width: parent.width - 6px; title: "General"; depth: 0; active: root.settings-section == 0; activated => { root.settings-section = 0; } }
+                    TreeChoice { x: 3px; y: 34px; width: parent.width - 6px; title: "Keyboard shortcuts"; depth: 0; active: root.settings-section == 1; activated => { root.settings-section = 1; } }
+                    TreeChoice { x: 3px; y: 63px; width: parent.width - 6px; title: "▾ Database"; depth: 0; active: false; activated => { root.settings-section = 2; } }
+                    TreeChoice { x: 3px; y: 92px; width: parent.width - 6px; title: "History"; depth: 1; active: root.settings-section == 2; activated => { root.settings-section = 2; } }
+                    TreeChoice { x: 3px; y: 121px; width: parent.width - 6px; title: "Templates"; depth: 1; active: root.settings-section == 3; activated => { root.settings-section = 3; } }
+                    TreeChoice { x: 3px; y: 150px; width: parent.width - 6px; title: "Appearance"; depth: 0; active: root.settings-section == 4; activated => { root.settings-section = 4; } }
+                    TreeChoice { x: 3px; y: 179px; width: parent.width - 6px; title: "Paste settings"; depth: 0; active: root.settings-section == 5; activated => { root.settings-section = 5; } }
+                    TreeChoice { x: 3px; y: 208px; width: parent.width - 6px; title: "Filtering"; depth: 0; active: root.settings-section == 6; activated => { root.settings-section = 6; } }
+                    TreeChoice { x: 3px; y: 237px; width: parent.width - 6px; title: "Additional"; depth: 0; active: root.settings-section == 7; activated => { root.settings-section = 7; } }
+                }
+                Rectangle { x: 225px; y: 98px; width: parent.width - 235px; height: parent.height - 157px; background: #282c34; border-width: 1px; border-color: #4d525d;
+                    if root.settings-section == 0: Rectangle { x: 14px; y: 16px; width: parent.width - 28px; height: parent.height - 32px; background: transparent;
+                        CheckBox { y: 8px; width: parent.width; text: "Show icon in the system tray"; checked: true; enabled: false; }
+                        CheckBox { y: 51px; width: parent.width; text: "Start minimized in the tray"; checked <=> root.start-hidden; enabled: !root.saving; }
+                        CheckBox { y: 94px; width: parent.width; text: "Start with Windows"; checked <=> root.start-with-windows; enabled: !root.saving; }
+                        Text { y: 158px; width: parent.width; height: 70px; text: "Closing the main window keeps rustclip running in the system tray. Use Exit to stop it."; color: #b3b7c0; font-size: 13px; wrap: word-wrap; }
+                    }
+                    if root.settings-section == 1: Rectangle { x: 10px; y: 10px; width: parent.width - 20px; height: parent.height - 20px; background: transparent;
+                        Text { x: 7px; width: parent.width - 14px; height: 24px; text: "Command                                  Shortcut"; color: #aeb2bd; font-size: 12px; vertical-alignment: center; }
+                        Rectangle { y: 25px; width: parent.width; height: 1px; background: #565a64; }
+                        ListView { x: 0px; y: 27px; width: parent.width; height: parent.height - 180px;
+                            for shortcut[index] in root.shortcuts: Rectangle { width: parent.width; height: 31px; background: root.selected-shortcut == index ? #4e365f : (Math.mod(index, 2) == 0 ? #2c3038 : #282c34);
+                                Text { x: 7px; width: parent.width - 155px; height: 30px; text: shortcut.name; color: #e6e5ea; font-size: 12px; vertical-alignment: center; overflow: elide; }
+                                Text { x: parent.width - 145px; width: 139px; height: 30px; text: shortcut.combo; color: #e6e5ea; font-size: 12px; vertical-alignment: center; overflow: elide; }
+                                TouchArea { clicked => { root.selected-shortcut = index; } }
+                            }
+                        }
+                        Rectangle { y: parent.height - 146px; width: parent.width; height: 1px; background: #565a64; }
+                        Text { x: 7px; y: parent.height - 141px; width: parent.width - 14px; height: 20px; text: "Edit selected shortcut"; color: #bd9ad7; font-size: 12px; vertical-alignment: center; }
+                        for shortcut[index] in root.shortcuts: Rectangle { x: 4px; y: parent.height - 119px; width: parent.width - 8px; height: 92px; visible: index == root.selected-shortcut; background: transparent;
+                            CheckBox { x: 3px; y: 7px; width: 62px; text: "Win"; checked: shortcut.win; toggled => { root.toggle-modifier(index, 8, self.checked); } }
+                            CheckBox { x: 68px; y: 7px; width: 64px; text: "Ctrl"; checked: shortcut.ctrl; toggled => { root.toggle-modifier(index, 2, self.checked); } }
+                            CheckBox { x: 137px; y: 7px; width: 58px; text: "Alt"; checked: shortcut.alt; toggled => { root.toggle-modifier(index, 1, self.checked); } }
+                            CheckBox { x: 200px; y: 7px; width: 73px; text: "Shift"; checked: shortcut.shift; toggled => { root.toggle-modifier(index, 4, self.checked); } }
+                            Button { x: 3px; y: 47px; width: 130px; height: 31px; text: shortcut.capturing ? "Press key..." : "Key: " + shortcut.key; clicked => { root.capture-key(index); } }
+                        }
+                    }
+                    if root.settings-section == 2: Rectangle { x: 14px; y: 16px; width: parent.width - 28px; height: parent.height - 32px; background: transparent;
+                        Text { y: 4px; width: parent.width; height: 23px; text: "Maximum history size (MiB)"; color: #e6e5ea; font-size: 13px; }
+                        LineEdit { y: 33px; width: 115px; height: 30px; text <=> root.history-limit-text; enabled: !root.saving; }
+                        Text { y: 88px; width: parent.width; height: 78px; text: "Text, images, and metadata count toward the limit. Oldest entries are removed first."; color: #b3b7c0; font-size: 13px; wrap: word-wrap; }
+                    }
+                    if root.settings-section == 3: Rectangle { x: 14px; y: 16px; width: parent.width - 28px; height: parent.height - 32px; background: transparent;
+                        Text { y: 4px; width: parent.width; height: 72px; text: "Templates are stored locally in groups. Manage them from the Templates tab."; color: #d2d1d8; font-size: 13px; wrap: word-wrap; }
+                        Button { y: 92px; width: 148px; height: 31px; text: "Open templates"; clicked => { root.open-templates(); } }
+                    }
+                    if root.settings-section == 4: Rectangle { x: 14px; y: 16px; width: parent.width - 28px; height: parent.height - 32px; background: transparent;
+                        Text { y: 4px; width: parent.width; height: 72px; text: "Dark theme is enabled for the main window, menus, and settings."; color: #d2d1d8; font-size: 13px; wrap: word-wrap; }
+                    }
+                    if root.settings-section == 5: Rectangle { x: 14px; y: 16px; width: parent.width - 28px; height: parent.height - 32px; background: transparent;
+                        CheckBox { y: 8px; width: parent.width; text: "Emulate Ctrl+V when pasting a clip"; checked <=> root.paste-enabled; enabled: !root.saving; }
+                        CheckBox { y: 51px; width: parent.width; text: "Restore previous clipboard after paste"; checked <=> root.restore-clipboard; enabled: !root.saving && root.paste-enabled; }
+                        Rectangle { x: 0px; y: 108px; width: parent.width; height: 115px; background: #252931; border-width: 1px; border-color: #50545f; }
+                        Text { x: 11px; y: 113px; width: parent.width - 22px; height: 22px; text: "Compatibility delay (ms)"; color: #d2d1d8; font-size: 13px; }
+                        LineEdit { x: 11px; y: 143px; width: 90px; height: 30px; text <=> root.paste-delay-text; enabled: !root.saving && root.paste-enabled; }
+                        Text { x: 11px; y: 183px; width: parent.width - 22px; height: 36px; text: "Used when restoring the previous clipboard."; color: #aeb2bd; font-size: 12px; wrap: word-wrap; }
+                    }
+                    if root.settings-section == 6: Rectangle { x: 14px; y: 16px; width: parent.width - 28px; height: parent.height - 32px; background: transparent;
+                        Text { y: 4px; width: parent.width; height: 85px; text: "All applications and supported clipboard formats are currently included in history."; color: #d2d1d8; font-size: 13px; wrap: word-wrap; }
+                    }
+                    if root.settings-section == 7: Rectangle { x: 14px; y: 16px; width: parent.width - 28px; height: parent.height - 32px; background: transparent;
+                        Text { y: 4px; width: parent.width; height: 85px; text: "rustclip stores history, templates, and settings locally on this computer."; color: #d2d1d8; font-size: 13px; wrap: word-wrap; }
+                    }
+                }
+                Text { x: 225px; y: parent.height - 49px; width: parent.width - 435px; height: 34px; text: root.status-text; color: #b3b7c0; font-size: 11px; overflow: elide; vertical-alignment: center; }
+                Button { x: parent.width - 175px; y: parent.height - 48px; width: 72px; height: 31px; text: "OK"; enabled: !root.saving; clicked => { root.save-settings(); } }
+                Button { x: parent.width - 94px; y: parent.height - 48px; width: 77px; height: 31px; text: "Cancel"; enabled: !root.saving; clicked => { root.cancel-settings(); } }
+            }
+        }
+    }
+}
+
+export component TrayIcon inherits SystemTrayIcon {
+    icon: @image-url("../assets/tray.png");
+    tooltip: "rustclip";
+    callback open-history();
+    callback open-templates();
+    callback open-settings();
+    callback clear-history();
+    callback exit-app();
+    clicked => { root.open-history(); }
+    Menu {
+        MenuItem { title: "Open history"; activated => { root.open-history(); } }
+        MenuItem { title: "Templates"; activated => { root.open-templates(); } }
+        MenuItem { title: "Settings"; activated => { root.open-settings(); } }
+        MenuItem { title: "Clear history"; activated => { root.clear-history(); } }
+        MenuSeparator {}
+        MenuItem { title: "Exit"; activated => { root.exit-app(); } }
+    }
+}

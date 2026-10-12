@@ -4,7 +4,7 @@
 
 - The owner requested implementation. This repository now contains an initial Windows prototype; describe only features present in the code as implemented.
 - [docs/requirements.md](docs/requirements.md) is the source of product requirements. [docs/technical-notes.md](docs/technical-notes.md) contains implementation guidance.
-- The prototype uses native Win32 controls. Do not add WebView, an embedded browser, or a browser-based UI framework.
+- The prototype uses Slint for its native desktop window and tray, with Win32 APIs for clipboard and global shortcuts. Do not add WebView, an embedded browser, or a browser-based UI framework.
 
 ## Language policy
 

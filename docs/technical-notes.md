@@ -1,17 +1,17 @@
 # Technical notes
 
-These are implementation guidelines for Windows. The UI must use native Windows components without WebView or an embedded browser.
+These are implementation guidelines for Windows. The UI must use a native desktop window and system tray without WebView or an embedded browser.
 
 ## Current implementation slice
 
-The prototype uses the `windows` crate for Win32 clipboard notifications, a native listbox, a tray icon, and a global shortcut. A worker thread reads text and writes one UTF-8 file per entry under `%LOCALAPPDATA%\rustclip\history`; temporary files are renamed after syncing so interrupted writes are ignored on restart. The fixed initial accounting cap is 64 MiB (UTF-8 text bytes plus 64 bytes per entry), with an 8 MiB per-text-entry cap. This does not yet measure actual filesystem allocation. The listbox currently shows at most the newest 1,000 entries. These are provisional implementation values, not final settings defaults.
+The prototype uses Slint 1.18 for its desktop window, controls, and system tray, and the windows crate for clipboard notifications, global shortcuts, target-window tracking, registry startup, and Ctrl+V injection. No WebView is used. The main window has a compact menu, toolbar, tabs, dense list, and bottom search field. Settings and template editing use dark modal overlays; settings has a section tree and a two-column shortcut editor. A worker reads text and CF_DIB/CF_DIBV5 images from the clipboard, saves one binary .clip file per event under %LOCALAPPDATA%\rustclip\history, and loads older .txt history files. Each write uses a temporary file and rename. The configured accounting limit covers text, image bytes, and metadata; the default is 64 MiB. Text is capped at 8 MiB and a DIB image at 48 MiB. The UI lists the newest 1,000 entries, searches at most 32,000 characters per entry, and builds small cached thumbnails off the UI thread.
 
-The current sequence-number check suppresses rustclip's own text restoration and treats a later external copy of identical text as a new event. Clipboard changes that are superseded before the worker reads them cannot be reconstructed from Windows' current clipboard state; rapid-copy behavior still needs Windows testing and refinement. The prototype has not yet implemented images, search, quick selection, configurable bindings, application identity, or paste into the original window.
+The clipboard owner and sequence-number checks suppress rustclip's own clipboard writes and allow a later external copy of identical content to be a new event. Clipboard changes superseded before the worker reads them cannot be reconstructed from Windows' current clipboard state. Templates are stored in %LOCALAPPDATA%\rustclip\templates.json with atomic replacement and support nested groups, including direct paste. Settings are stored in %LOCALAPPDATA%\rustclip\settings.conf; shortcut conflicts and registration errors are reported. Paste targets are captured before showing the UI and checked again before Ctrl+V. Optional clipboard restoration snapshots all formats backed by movable global memory up to 64 MiB and only restores while the selected clip remains current. The compact quick-selection preview, application identity, and additional image formats remain unimplemented.
 
 ## Data flow
 
 ```text
-Clipboard change → snapshot of formats and source application
+Clipboard change → read supported formats (source application: planned)
                  → size checks and data reads
                  → bounded queue → persistent storage
                                  → search index and thumbnails
@@ -24,7 +24,7 @@ Keyboard handlers and the UI thread should perform only short operations. Large 
 
 ## Self-initiated clipboard writes
 
-Placing a selected entry on the clipboard needs an explicit operation that expects a clipboard-change notification. The implementation must suppress only its own notification while retaining external changes before, during, and after the operation. One possible mechanism is matching a notification to a clipboard sequence number and the write operation's state; the exact approach needs validation in a Windows prototype.
+Placing a selected entry on the clipboard records the resulting sequence number, and the worker also checks clipboard ownership so its own notification is ignored. The worker checks that a queued external sequence is still current before reading it. This approach still needs Windows testing around delayed notifications, rapid copies, and writes by another application.
 
 Comparing text, image data, or hashes alone is insufficient: a user may copy the same data again from another application. Test delayed and duplicate notifications, rapid alternation of self-initiated and external writes, and another application changing the clipboard during selection.
 
@@ -34,15 +34,15 @@ Comparing text, image data, or hashes alone is insufficient: a user may copy the
 - Validate text and images for size and decodability. Handle read and decode errors locally; an unknown format can be skipped without discarding other representations from the event.
 - Write history atomically or transactionally so a failure cannot leave a half-saved entry. Load large data and thumbnails on demand so opening the window is not delayed.
 - The storage limit covers actual space used by entries, including metadata and images. Prune whole entries from oldest to newest. Skip a new entry that exceeds the limit by itself without pruning existing history.
-- Clipboard data may be sensitive: keep it local and out of ordinary logs. When settings are implemented, provide a way to clear history.
+- Clipboard data may be sensitive: keep it local and out of ordinary logs. The tray and main window provide a way to clear history.
 
 ## Windows integration and keyboard commands
 
 Separate components handle the clipboard, global shortcut registration, active-window detection, display above other windows, and paste. This allows Windows behavior to be validated independently of history and UI logic.
 
-Keep a message window alive while the application runs in the tray. Closing the main window should hide it; explicit Exit should remove the tray icon, unregister hotkeys and clipboard listeners, and terminate the message loop. Native Win32 controls are suitable for an initial implementation, but the requirements do not mandate a particular Rust wrapper.
+Keep a message window alive while the application runs in the tray. Closing the main window should hide it; explicit Exit should remove the tray icon, unregister hotkeys and clipboard listeners, and terminate the message loop. Slint draws the desktop controls using its software renderer with Fluent dark styling; the tray and window are native desktop integrations.
 
-Capture the original window before showing the preview. Before automatic paste, confirm the window still exists and that the action cannot be directed into rustclip. If it is unsafe to restore focus or paste, leave the selected data on the clipboard. Check all keyboard bindings for internal conflicts before saving settings; show global shortcut registration errors to the user.
+Capture the original window before showing rustclip. Before automatic paste, confirm the window still exists, belongs to another process, and can be activated. If activation fails, leave the clipboard unchanged. If the target disappears after the selected clip is written, leave that clip on the clipboard and report the failure. Check all keyboard bindings for conflicts before saving settings; show global registration errors.
 
 ## Responsiveness checks
 
