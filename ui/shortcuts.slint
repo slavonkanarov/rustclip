@@ -1,0 +1,53 @@
+import { Button, CheckBox, ListView } from "std-widgets.slint";
+import { ShortcutRow } from "models.slint";
+
+export component ShortcutEditor inherits Rectangle {
+    in property <[ShortcutRow]> shortcuts;
+    in property <bool> saving;
+    in-out property <int> selected;
+    property <ShortcutRow> current: root.shortcuts[root.selected];
+    callback toggle-modifier(int, int, bool);
+    callback capture-key(int);
+    callback clear-shortcut(int);
+    VerticalLayout {
+        spacing: 10px;
+        ListView {
+            vertical-stretch: 1;
+            for shortcut[index] in root.shortcuts: Rectangle {
+                height: 48px; background: root.selected == index ? #4d3768 : #2b303d;
+                HorizontalLayout {
+                    padding-left: 10px; padding-right: 10px; spacing: 6px;
+                    VerticalLayout {
+                        spacing: 0px; padding-top: 5px; padding-bottom: 5px;
+                        Text { text: shortcut.name; color: #edf0f6; font-size: 13px; overflow: elide; }
+                        Text { text: shortcut.scope; color: #acb2c1; font-size: 10px; }
+                    }
+                    Text { text: shortcut.combo; color: #e0cafa; vertical-alignment: center; font-size: 12px; overflow: elide; min-width: 155px; }
+                }
+                TouchArea { clicked => { root.selected = index; } }
+            }
+        }
+        Rectangle { height: 1px; background: #444b5b; }
+        Rectangle {
+            height: 114px;
+            VerticalLayout {
+                spacing: 8px;
+                Text { text: root.current.capturing ? "Press a key. Esc cancels." : "Edit: " + root.current.name; color: #c3a3e2; font-size: 12px; }
+                HorizontalLayout {
+                    spacing: 10px;
+                    CheckBox { text: "Win"; checked: root.current.win; enabled: !root.saving; toggled => { root.toggle-modifier(root.selected, 8, self.checked); } }
+                    CheckBox { text: "Ctrl"; checked: root.current.ctrl; enabled: !root.saving; toggled => { root.toggle-modifier(root.selected, 2, self.checked); } }
+                    CheckBox { text: "Alt"; checked: root.current.alt; enabled: !root.saving; toggled => { root.toggle-modifier(root.selected, 1, self.checked); } }
+                    CheckBox { text: "Shift"; checked: root.current.shift; enabled: !root.saving; toggled => { root.toggle-modifier(root.selected, 4, self.checked); } }
+                    Rectangle { horizontal-stretch: 1; }
+                }
+                HorizontalLayout {
+                    height: 32px; spacing: 8px;
+                    Button { text: root.current.capturing ? "Press key…" : "Key: " + root.current.key; enabled: !root.saving; clicked => { root.capture-key(root.selected); } }
+                    Button { text: "Clear"; visible: root.current.optional; enabled: !root.saving; clicked => { root.clear-shortcut(root.selected); } }
+                    Rectangle { horizontal-stretch: 1; }
+                }
+            }
+        }
+    }
+}

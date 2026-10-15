@@ -1,0 +1,78 @@
+import { Button, LineEdit, ListView, TextEdit } from "std-widgets.slint";
+import { TemplateRow } from "models.slint";
+
+export component TemplatesView inherits Rectangle {
+    in property <[TemplateRow]> rows;
+    in property <int> kind;
+    in property <bool> paste-enabled;
+    in-out property <string> query;
+    callback search-changed();
+    callback select(int);
+    callback toggle-group(int);
+    callback new-group();
+    callback new-template();
+    callback edit();
+    callback delete();
+    callback copy();
+    callback paste();
+    VerticalLayout {
+        spacing: 10px;
+        HorizontalLayout {
+            height: 34px; spacing: 6px;
+            Button { text: "New group"; clicked => { root.new-group(); } }
+            Button { text: "New template"; enabled: root.kind != 0; clicked => { root.new-template(); } }
+            Button { text: "Edit"; enabled: root.kind != 0; clicked => { root.edit(); } }
+            Button { text: "Delete"; enabled: root.kind != 0; clicked => { root.delete(); } }
+            Rectangle { horizontal-stretch: 1; }
+            Button { text: "Copy"; enabled: root.kind == 2; clicked => { root.copy(); } }
+            Button { text: "Paste"; primary: true; enabled: root.kind == 2 && root.paste-enabled; clicked => { root.paste(); } }
+        }
+        Rectangle {
+            border-width: 1px; border-color: #3c4250; vertical-stretch: 1;
+            ListView {
+                x: 1px; y: 1px; width: parent.width - 2px; height: parent.height - 2px;
+                for row[index] in root.rows: Rectangle {
+                    height: 38px; background: row.selected ? #4d3768 : #222733;
+                    HorizontalLayout {
+                        padding-left: 8px + row.depth * 18px; spacing: 8px;
+                        Rectangle {
+                            width: 24px;
+                            Text { text: row.folder ? (row.collapsed ? "▸" : "▾") : "•"; color: #c3a3e2; horizontal-alignment: center; vertical-alignment: center; }
+                            TouchArea { clicked => { if row.folder { root.toggle-group(index); } else { root.select(index); } } }
+                        }
+                        Rectangle {
+                            horizontal-stretch: 1;
+                            Text { text: row.name; color: #edf0f6; vertical-alignment: center; overflow: elide; }
+                            TouchArea { clicked => { root.select(index); } double-clicked => { root.select(index); root.edit(); } }
+                        }
+                    }
+                }
+            }
+            if root.rows.length == 0: Text { text: "Create a group to organize your templates."; color: #aab1c2; horizontal-alignment: center; vertical-alignment: center; }
+        }
+        LineEdit { height: 34px; placeholder-text: "Search templates"; text <=> root.query; edited => { root.search-changed(); } }
+    }
+}
+
+export component TemplateEditor inherits Rectangle {
+    in property <int> kind;
+    in-out property <string> name;
+    in-out property <string> content;
+    callback save();
+    callback copy();
+    callback cancel();
+    background: #242935; border-width: 1px; border-color: #79608e; border-radius: 8px;
+    VerticalLayout {
+        padding: 20px; spacing: 12px;
+        Text { text: root.kind == 1 ? "Edit group" : "Edit template"; color: #f0e7fa; font-size: 20px; }
+        LineEdit { placeholder-text: "Name"; text <=> root.name; }
+        TextEdit { visible: root.kind == 2; text <=> root.content; vertical-stretch: 1; }
+        HorizontalLayout {
+            height: 34px; spacing: 8px;
+            Rectangle { horizontal-stretch: 1; }
+            Button { text: "Cancel"; clicked => { root.cancel(); } }
+            Button { text: "Copy"; enabled: root.kind == 2; clicked => { root.copy(); } }
+            Button { text: "Save"; primary: true; clicked => { root.save(); } }
+        }
+    }
+}

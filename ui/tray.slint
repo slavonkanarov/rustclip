@@ -1,0 +1,16 @@
+export component TrayIcon inherits SystemTrayIcon {
+    icon: @image-url("../assets/tray.png");
+    tooltip: "rustclip";
+    callback open-history();
+    callback open-templates();
+    callback open-settings();
+    callback exit-app();
+    clicked => { root.open-history(); }
+    Menu {
+        MenuItem { title: "Open history"; activated => { root.open-history(); } }
+        MenuItem { title: "Templates"; activated => { root.open-templates(); } }
+        MenuItem { title: "Settings"; activated => { root.open-settings(); } }
+        MenuSeparator {}
+        MenuItem { title: "Exit"; activated => { root.exit-app(); } }
+    }
+}

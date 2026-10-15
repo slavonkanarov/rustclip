@@ -1,5 +1,6 @@
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
+mod history_selection;
 mod settings;
 mod store;
 mod templates;

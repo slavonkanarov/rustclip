@@ -4,10 +4,11 @@ use crate::windows_clipboard::{self, RestoreOutcome};
 use std::ffi::c_void;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use windows::Win32::Foundation::HWND;
 use windows::Win32::UI::Input::KeyboardAndMouse::{
-    INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP, SendInput, VK_CONTROL, VK_V,
+    GetAsyncKeyState, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP, SendInput,
+    VK_CONTROL, VK_LWIN, VK_MENU, VK_RWIN, VK_SHIFT, VK_V,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     GetClassNameW, GetForegroundWindow, GetWindowThreadProcessId, IsWindow, IsWindowVisible,
@@ -20,9 +21,21 @@ pub fn paste(
     monitor_window: usize,
     settings: &Settings,
     own_sequence: &AtomicU32,
+    expected_sequence: Option<u32>,
 ) -> Result<&'static str, String> {
     if !settings.paste_enabled {
         return Err("Automatic paste is disabled in settings.".into());
+    }
+    // Do not inject Ctrl+V while Alt, Shift, or a shortcut key modifier is still held.
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while [VK_CONTROL, VK_MENU, VK_SHIFT, VK_LWIN, VK_RWIN]
+        .iter()
+        .any(|key| unsafe { GetAsyncKeyState(key.0 as i32) < 0 })
+    {
+        if Instant::now() >= deadline {
+            return Err("Release shortcut modifiers before pasting.".into());
+        }
+        thread::sleep(Duration::from_millis(10));
     }
     let target = HWND(target as *mut c_void);
     let owner = HWND(monitor_window as *mut c_void);
@@ -45,7 +58,7 @@ pub fn paste(
     } else {
         None
     };
-    let written = unsafe { windows_clipboard::write(clip, owner)? };
+    let written = unsafe { windows_clipboard::write_checked(clip, owner, expected_sequence)? };
     own_sequence.store(written.sequence, Ordering::Release);
     if !valid_target(target) || unsafe { GetForegroundWindow() } != target {
         return Err(

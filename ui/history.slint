@@ -1,0 +1,64 @@
+import { Button, LineEdit, ListView } from "std-widgets.slint";
+import { ClipRow } from "models.slint";
+
+export component HistoryView inherits Rectangle {
+    in property <[ClipRow]> clips;
+    in property <bool> has-selection;
+    in property <bool> paste-enabled;
+    in property <int> selected-index;
+    in property <string> quick-hint;
+    in-out property <string> query;
+    callback search-changed();
+    callback select(int);
+    callback activate(int);
+    callback copy();
+    callback paste();
+    callback delete();
+    public function focus-search() { search.focus(); }
+
+    changed selected-index => {
+        if root.selected-index >= 0 {
+            if root.selected-index * 38px < -list.content-y {
+                list.content-y = -root.selected-index * 38px;
+            } else if (root.selected-index + 1) * 38px > -list.content-y + list.height {
+                list.content-y = list.height - (root.selected-index + 1) * 38px;
+            }
+        }
+    }
+    VerticalLayout {
+        spacing: 10px;
+        HorizontalLayout {
+            height: 34px; spacing: 8px;
+            Button { text: "Paste"; primary: true; enabled: root.has-selection && root.paste-enabled; clicked => { root.paste(); } }
+            Button { text: "Copy"; enabled: root.has-selection; clicked => { root.copy(); } }
+            Button { text: "Delete"; enabled: root.has-selection; clicked => { root.delete(); } }
+            Rectangle { horizontal-stretch: 1; }
+            Text { text: root.clips.length + " clips"; color: #aab1c2; vertical-alignment: center; }
+        }
+        Text { text: root.quick-hint; color: #aab1c2; font-size: 12px; height: 20px; overflow: elide; }
+        Rectangle {
+            vertical-stretch: 1; border-width: 1px; border-color: #3c4250; border-radius: 5px;
+            list := ListView {
+                x: 1px; y: 1px; width: parent.width - 2px; height: parent.height - 2px;
+                for clip[index] in root.clips: Rectangle {
+                    height: 38px;
+                    background: clip.selected ? #4d3768 : (row-touch.has-hover ? #2b303e : (Math.mod(index, 2) == 0 ? #1e222c : #222733));
+                    HorizontalLayout {
+                        padding-left: 10px; padding-right: 12px; spacing: 10px;
+                        Image { width: 28px; source: clip.thumbnail; image-fit: contain; }
+                        Text { text: clip.preview; color: #edf0f6; font-size: 13px; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
+                    }
+                    row-touch := TouchArea {
+                        clicked => { root.select(index); }
+                        double-clicked => { root.activate(index); }
+                    }
+                }
+            }
+            if root.clips.length == 0: Text {
+                text: root.query == "" ? "Copy text or an image to start your history." : "No matching clips";
+                color: #aab1c2; horizontal-alignment: center; vertical-alignment: center;
+            }
+        }
+        search := LineEdit { height: 34px; placeholder-text: "Search clipboard history"; text <=> root.query; edited => { root.search-changed(); } }
+    }
+}

@@ -1,0 +1,88 @@
+import { Button, CheckBox, LineEdit, ListView } from "std-widgets.slint";
+import { ShortcutRow } from "models.slint";
+import { ShortcutEditor } from "shortcuts.slint";
+
+export component SettingsView inherits Rectangle {
+    in property <[ShortcutRow]> shortcuts;
+    in property <bool> saving;
+    in-out property <int> selected-shortcut;
+    in-out property <int> section;
+    in-out property <bool> start-hidden;
+    in-out property <bool> start-with-windows;
+    in-out property <bool> paste-enabled;
+    in-out property <bool> restore-clipboard;
+    in-out property <string> paste-delay-text;
+    in-out property <string> history-limit-text;
+    callback toggle-modifier(int, int, bool);
+    callback capture-key(int);
+    callback clear-shortcut(int);
+    callback save();
+    callback cancel();
+    callback reset();
+    callback clear-history();
+
+    VerticalLayout {
+        spacing: 14px;
+        HorizontalLayout {
+            spacing: 18px;
+            VerticalLayout {
+                width: 170px; spacing: 8px;
+                for title[index] in ["General", "Keyboard shortcuts", "Clipboard history", "Paste settings"]: Button {
+                    text: title; primary: root.section == index; height: 38px;
+                    clicked => { root.section = index; }
+                }
+                Rectangle { vertical-stretch: 1; }
+            }
+            Rectangle {
+                horizontal-stretch: 1; background: #222733; border-radius: 6px;
+                VerticalLayout {
+                    padding: 18px; spacing: 14px;
+                    Text {
+                        text: root.section == 0 ? "General" : root.section == 1 ? "Keyboard shortcuts" : root.section == 2 ? "Clipboard history" : "Paste settings";
+                        color: #f0e7fa; font-size: 22px; height: 30px;
+                    }
+                    Rectangle {
+                        vertical-stretch: 1;
+                        if root.section == 0: VerticalLayout {
+                            spacing: 16px; alignment: start;
+                            CheckBox { text: "Start with Windows"; checked <=> root.start-with-windows; enabled: !root.saving; }
+                            CheckBox { text: "Start in the tray when Windows starts"; checked <=> root.start-hidden; enabled: !root.saving; }
+                            Text { text: "Opening rustclip manually always shows the main window. Closing it keeps clipboard history running in the tray."; color: #b8bdca; wrap: word-wrap; }
+                        }
+                        if root.section == 1: ShortcutEditor {
+                            shortcuts: root.shortcuts; selected <=> root.selected-shortcut; saving: root.saving;
+                            toggle-modifier(index, flag, value) => { root.toggle-modifier(index, flag, value); }
+                            capture-key(index) => { root.capture-key(index); }
+                            clear-shortcut(index) => { root.clear-shortcut(index); }
+                        }
+                        if root.section == 2: VerticalLayout {
+                            spacing: 16px; alignment: start;
+                            Text { text: "Maximum history size (MiB)"; color: #edf0f6; }
+                            LineEdit { text <=> root.history-limit-text; enabled: !root.saving; max-width: 130px; }
+                            Text { text: "16–4096 MiB, including text, images, and metadata. The oldest entries are removed first."; color: #b8bdca; wrap: word-wrap; }
+                            Rectangle { height: 1px; background: #444b5b; }
+                            Text { text: "Clear clipboard history"; color: #edf0f6; }
+                            Text { text: "Delete all saved clips. Templates are kept. You will be asked to confirm."; color: #b8bdca; wrap: word-wrap; }
+                            Button { text: "Clear all history…"; enabled: !root.saving; max-width: 180px; clicked => { root.clear-history(); } }
+                        }
+                        if root.section == 3: VerticalLayout {
+                            spacing: 16px; alignment: start;
+                            CheckBox { text: "Enable paste with Ctrl+V"; checked <=> root.paste-enabled; enabled: !root.saving; }
+                            CheckBox { text: "Restore previous clipboard after paste"; checked <=> root.restore-clipboard; enabled: !root.saving && root.paste-enabled; }
+                            Text { text: "Compatibility delay (ms)"; color: #edf0f6; }
+                            LineEdit { text <=> root.paste-delay-text; enabled: !root.saving && root.paste-enabled; max-width: 130px; }
+                            Text { text: "Double-click pastes a clip into the previous application. Hold the global shortcut modifiers to browse, then release to paste the selected clip."; color: #b8bdca; wrap: word-wrap; }
+                        }
+                    }
+                }
+            }
+        }
+        HorizontalLayout {
+            height: 36px; spacing: 8px;
+            Button { text: "Reset defaults"; enabled: !root.saving; clicked => { root.reset(); } }
+            Rectangle { horizontal-stretch: 1; }
+            Button { text: "Cancel"; enabled: !root.saving; clicked => { root.cancel(); } }
+            Button { text: root.saving ? "Saving…" : "Save settings"; primary: true; enabled: !root.saving; clicked => { root.save(); } }
+        }
+    }
+}

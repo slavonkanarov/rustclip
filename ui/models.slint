@@ -1,0 +1,29 @@
+export struct ClipRow {
+    preview: string,
+    kind: string,
+    thumbnail: image,
+    selected: bool,
+}
+
+export struct ShortcutRow {
+    name: string,
+    scope: string,
+    key: string,
+    combo: string,
+    win: bool,
+    ctrl: bool,
+    alt: bool,
+    shift: bool,
+    capturing: bool,
+    optional: bool,
+}
+
+export struct TemplateRow {
+    name: string,
+    detail: string,
+    depth: int,
+    folder: bool,
+    collapsed: bool,
+    selected: bool,
+}
+

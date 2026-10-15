@@ -10,7 +10,7 @@ pub fn thumbnail(image: &ImageBlob) -> Option<SharedPixelBuffer<Rgba8Pixel>> {
     }
     let decoder = BmpDecoder::new_without_file_header(Cursor::new(&image.dib)).ok()?;
     let decoded = DynamicImage::from_decoder(decoder).ok()?;
-    let small = decoded.thumbnail(88, 60).into_rgba8();
+    let small = decoded.thumbnail(180, 120).into_rgba8();
     Some(SharedPixelBuffer::clone_from_slice(
         small.as_raw(),
         small.width(),

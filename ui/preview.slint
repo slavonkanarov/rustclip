@@ -1,0 +1,30 @@
+export component PreviewWindow inherits Window {
+    title: "rustclip preview";
+    preferred-width: 370px; min-width: 220px; max-width: 370px;
+    height: 290px;
+    no-frame: true;
+    always-on-top: true;
+    background: #222733;
+    in-out property <string> entry-id;
+    in-out property <string> preview-text;
+    in-out property <string> preview-kind;
+    in-out property <string> preview-count;
+    in-out property <image> preview-image;
+    in-out property <bool> quick-mode: false;
+    in-out property <string> hint-text;
+    Rectangle {
+        border-width: 1px; border-color: #9574b0; border-radius: 6px;
+        VerticalLayout {
+            padding: 14px; spacing: 10px;
+            HorizontalLayout {
+                height: 22px;
+                Text { text: root.preview-kind; color: #dec5f2; font-size: 12px; horizontal-stretch: 1; }
+                Text { text: root.preview-count; color: #b8bdca; font-size: 12px; }
+            }
+            Image { visible: root.preview-image.width > 0; height: root.preview-image.width > 0 ? 132px : 0px; source: root.preview-image; image-fit: contain; }
+            Text { text: root.preview-text; color: #f3f0f6; font-size: 14px; wrap: word-wrap; overflow: elide; vertical-stretch: 1; }
+            Rectangle { height: 1px; background: #444b5b; }
+            Text { text: root.hint-text; color: #b8bdca; font-size: 11px; wrap: word-wrap; height: 32px; }
+        }
+    }
+}

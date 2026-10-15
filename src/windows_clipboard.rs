@@ -97,6 +97,14 @@ pub struct WriteResult {
 }
 
 pub unsafe fn write(data: &ClipData, owner: HWND) -> Result<WriteResult, String> {
+    unsafe { write_checked(data, owner, None) }
+}
+
+pub unsafe fn write_checked(
+    data: &ClipData,
+    owner: HWND,
+    expected_sequence: Option<u32>,
+) -> Result<WriteResult, String> {
     unsafe {
         let text_bytes = data.text.as_ref().map(|text| {
             text.encode_utf16()
@@ -132,6 +140,16 @@ pub unsafe fn write(data: &ClipData, owner: HWND) -> Result<WriteResult, String>
             return Err(error.to_string());
         }
         let _guard = ClipboardGuard;
+        if expected_sequence.is_some_and(|sequence| sequence != GetClipboardSequenceNumber()) {
+            if let Some(memory) = text_memory {
+                let _ = GlobalFree(Some(memory));
+            }
+            if let Some(memory) = image_memory {
+                let _ = GlobalFree(Some(memory));
+            }
+            return Err("Clipboard changed during selection; paste was cancelled.".into());
+        }
+
         if let Err(error) = EmptyClipboard() {
             if let Some(memory) = text_memory {
                 let _ = GlobalFree(Some(memory));

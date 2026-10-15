@@ -3386,6 +3386,7 @@ name = "rustclip"
 version = "0.1.0"
 dependencies = [
  "image",
+ "raw-window-handle",
  "serde",
  "serde_json",
  "slint",
@@ -3645,6 +3646,7 @@ checksum = "15e477d5ff6fec20909100ff8f7062432ebfbda7a62a0f37d0252aa126f38c83"
 dependencies = [
  "const-field-offset",
  "i-slint-backend-selector",
+ "i-slint-backend-winit",
  "i-slint-common",
  "i-slint-core",
  "i-slint-core-macros",
@@ -3652,6 +3654,7 @@ dependencies = [
  "num-traits",
  "once_cell",
  "pin-weak",
+ "raw-window-handle",
  "slint-macros",
  "unicode-segmentation",
  "vtable",

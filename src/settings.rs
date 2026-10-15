@@ -18,10 +18,14 @@ pub enum Action {
     PasteSelected,
     DeleteSelected,
     FocusSearch,
+    BrowseOlder,
+    BrowseNewer,
+    CloseView,
+    CancelQuick,
 }
 
 impl Action {
-    pub const ALL: [Self; 9] = [
+    pub const ALL: [Self; 13] = [
         Self::OpenHistory,
         Self::OpenSettings,
         Self::OpenTemplates,
@@ -31,6 +35,10 @@ impl Action {
         Self::PasteSelected,
         Self::DeleteSelected,
         Self::FocusSearch,
+        Self::BrowseOlder,
+        Self::BrowseNewer,
+        Self::CloseView,
+        Self::CancelQuick,
     ];
 
     pub const fn index(self) -> usize {
@@ -48,6 +56,10 @@ impl Action {
             Self::PasteSelected => "Paste selected",
             Self::DeleteSelected => "Delete selected",
             Self::FocusSearch => "Focus search",
+            Self::BrowseOlder => "Select older clip",
+            Self::BrowseNewer => "Select newer clip",
+            Self::CloseView => "Close view",
+            Self::CancelQuick => "Cancel quick selection",
         }
     }
 
@@ -62,15 +74,37 @@ impl Action {
             Self::PasteSelected => "paste_selected",
             Self::DeleteSelected => "delete_selected",
             Self::FocusSearch => "focus_search",
+            Self::BrowseOlder => "browse_older",
+            Self::BrowseNewer => "browse_newer",
+            Self::CloseView => "close_view",
+            Self::CancelQuick => "cancel_quick",
         }
     }
 
     pub const fn global(self) -> bool {
         matches!(
             self,
-            Self::OpenHistory | Self::OpenSettings | Self::OpenTemplates
+            Self::OpenHistory
+                | Self::OpenSettings
+                | Self::OpenTemplates
+                | Self::BrowseOlder
+                | Self::BrowseNewer
+                | Self::CancelQuick
         )
     }
+
+    pub const fn optional(self) -> bool {
+        matches!(self, Self::OpenSettings | Self::OpenTemplates)
+    }
+
+    pub const GLOBAL: [Self; 6] = [
+        Self::OpenHistory,
+        Self::OpenSettings,
+        Self::OpenTemplates,
+        Self::BrowseOlder,
+        Self::BrowseNewer,
+        Self::CancelQuick,
+    ];
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -85,6 +119,9 @@ impl Binding {
     }
 
     pub fn label(self) -> String {
+        if self.key == 0 {
+            return "Not set".into();
+        }
         let mut parts = Vec::new();
         for (flag, name) in [(WIN, "Win"), (CTRL, "Ctrl"), (ALT, "Alt"), (SHIFT, "Shift")] {
             if self.modifiers & flag != 0 {
@@ -98,7 +135,7 @@ impl Binding {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Settings {
-    pub bindings: [Binding; 9],
+    pub bindings: [Binding; 13],
     pub start_hidden: bool,
     pub start_with_windows: bool,
     pub paste_enabled: bool,
@@ -111,15 +148,19 @@ impl Default for Settings {
     fn default() -> Self {
         Self {
             bindings: [
-                Binding::new(b'J' as u32, WIN | SHIFT),
-                Binding::new(b'K' as u32, WIN | SHIFT),
-                Binding::new(b'Y' as u32, WIN | SHIFT),
+                Binding::new(b'H' as u32, WIN | SHIFT),
+                Binding::new(0, 0),
+                Binding::new(0, 0),
                 Binding::new(0x28, 0),
                 Binding::new(0x26, 0),
                 Binding::new(0x0d, 0),
                 Binding::new(0x0d, CTRL | SHIFT),
                 Binding::new(0x2e, CTRL | SHIFT),
                 Binding::new(b'F' as u32, CTRL),
+                Binding::new(0x26, ALT | SHIFT),
+                Binding::new(0x28, ALT | SHIFT),
+                Binding::new(0x1b, 0),
+                Binding::new(0x1b, ALT | SHIFT),
             ],
             start_hidden: true,
             start_with_windows: false,
@@ -145,6 +186,12 @@ impl Settings {
         }
         for action in Action::ALL {
             let binding = self.binding(action);
+            if binding.key == 0 && action.optional() {
+                if binding.modifiers != 0 {
+                    return Err(format!("Choose a key or clear {}.", action.name()));
+                }
+                continue;
+            }
             if !valid_key(binding.key) {
                 return Err(format!("Choose a key for {}.", action.name()));
             }
@@ -155,7 +202,10 @@ impl Settings {
                 return Err(format!("{} needs at least one modifier.", action.name()));
             }
             for other in Action::ALL {
-                if action.index() < other.index() && binding == self.binding(other) {
+                if action.index() < other.index()
+                    && binding == self.binding(other)
+                    && action.global() == other.global()
+                {
                     return Err(format!(
                         "{} conflicts with {}.",
                         action.name(),
@@ -174,6 +224,7 @@ impl Settings {
             Err(error) => return Err(error),
         };
         let mut settings = Self::default();
+        let mut version = 1;
         for line in content.lines() {
             let Some((name, value)) = line.split_once('=') else {
                 return Err(io::Error::new(
@@ -182,6 +233,10 @@ impl Settings {
                 ));
             };
             match name {
+                "settings_version" => {
+                    version = parse_number(value)?;
+                    continue;
+                }
                 "start_hidden" => {
                     settings.start_hidden = parse_bool(value)?;
                     continue;
@@ -225,6 +280,17 @@ impl Settings {
             })?;
             settings.bindings[action.index()] = Binding::new(key, modifiers);
         }
+        if version < 2 {
+            if settings.binding(Action::OpenHistory) == Binding::new(b'J' as u32, WIN | SHIFT) {
+                settings.bindings[Action::OpenHistory.index()] =
+                    Binding::new(b'H' as u32, WIN | SHIFT);
+            }
+            for (action, key) in [(Action::OpenSettings, b'K'), (Action::OpenTemplates, b'Y')] {
+                if settings.binding(action) == Binding::new(key as u32, WIN | SHIFT) {
+                    settings.bindings[action.index()] = Binding::new(0, 0);
+                }
+            }
+        }
         settings
             .validate()
             .map_err(|message| io::Error::new(io::ErrorKind::InvalidData, message))?;
@@ -240,6 +306,7 @@ impl Settings {
         fs::create_dir_all(parent)?;
         let temporary = path.with_extension("tmp");
         let mut file = File::create(&temporary)?;
+        writeln!(file, "settings_version=3")?;
         for action in Action::ALL {
             let binding = self.binding(action);
             writeln!(
@@ -293,6 +360,7 @@ pub fn valid_key(key: u32) -> bool {
 
 pub fn key_name(key: u32) -> &'static str {
     match key {
+        0 => "None",
         0x08 => "Backspace",
         0x09 => "Tab",
         0x0d => "Enter",
@@ -378,16 +446,23 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
-    fn defaults_use_win_shift_for_global_shortcuts() {
+    fn defaults_offer_quick_selection_without_settings_or_templates_hotkeys() {
         let settings = Settings::default();
         assert_eq!(
             settings.binding(Action::OpenHistory).label(),
-            "Win + Shift + J"
+            "Win + Shift + H"
         );
         assert_eq!(
-            settings.binding(Action::OpenSettings).label(),
-            "Win + Shift + K"
+            settings.binding(Action::BrowseOlder).label(),
+            "Alt + Shift + Up"
         );
+        assert_eq!(
+            settings.binding(Action::BrowseNewer).label(),
+            "Alt + Shift + Down"
+        );
+        assert_eq!(settings.binding(Action::OpenSettings).label(), "Not set");
+        assert_eq!(settings.binding(Action::OpenTemplates).label(), "Not set");
+        assert!(Action::GLOBAL.iter().all(|action| action.global()));
         settings.validate().unwrap();
     }
 
@@ -426,6 +501,32 @@ mod tests {
         settings.history_limit_mb = 128;
         settings.save(&path).unwrap();
         assert_eq!(Settings::load(&path).unwrap(), settings);
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn legacy_global_defaults_migrate_without_discarding_other_settings() {
+        let path = std::env::temp_dir().join(format!(
+            "rustclip-legacy-settings-{}.conf",
+            std::process::id()
+        ));
+        fs::write(
+            &path,
+            "open_history=74,12\nopen_settings=75,12\nopen_templates=89,12\nhistory_limit_mb=128\n",
+        )
+        .unwrap();
+        let settings = Settings::load(&path).unwrap();
+        assert_eq!(
+            settings.binding(Action::OpenHistory).label(),
+            "Win + Shift + H"
+        );
+        assert_eq!(
+            settings.binding(Action::BrowseNewer).label(),
+            "Alt + Shift + Down"
+        );
+        assert_eq!(settings.binding(Action::OpenSettings).label(), "Not set");
+        assert_eq!(settings.binding(Action::OpenTemplates).label(), "Not set");
+        assert_eq!(settings.history_limit_mb, 128);
         fs::remove_file(path).unwrap();
     }
 }
