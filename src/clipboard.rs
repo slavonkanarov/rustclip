@@ -376,6 +376,21 @@ fn released() -> bool {
             .all(|k| GetAsyncKeyState(*k as i32) >= 0)
     }
 }
+fn hotkey_held(key: u32, modifiers: u32) -> bool {
+    unsafe {
+        GetAsyncKeyState(key as i32) < 0
+            && [
+                (MOD_CONTROL, VK_CONTROL),
+                (MOD_SHIFT, VK_SHIFT),
+                (MOD_ALT, VK_MENU),
+            ]
+            .iter()
+            .all(|&(modifier, vk)| modifiers & modifier == 0 || GetAsyncKeyState(vk as i32) < 0)
+            && (modifiers & MOD_WIN == 0
+                || GetAsyncKeyState(VK_LWIN as i32) < 0
+                || GetAsyncKeyState(VK_RWIN as i32) < 0)
+    }
+}
 fn paste(target: HWND, ctrl_v: bool) -> Result<(), String> {
     unsafe {
         if target.is_null() || IsWindow(target) == 0 {
@@ -513,6 +528,7 @@ pub fn start(
         let mut dirty = false;
         let mut last_sequence = GetClipboardSequenceNumber();
         let mut last_foreground = null_mut();
+        let mut repeat: Option<(usize, u32, u32, usize, Instant)> = None;
         'run: loop {
             let foreground = GetForegroundWindow();
             let mut pid = 0;
@@ -560,6 +576,21 @@ pub fn start(
                     };
                     let _ = tx.send(event);
                     ctx.request_repaint();
+                    if msg.wParam == 2 || msg.wParam == 3 {
+                        if let Ok(binding) = hotkeys::parse(if msg.wParam == 2 {
+                            &settings.hotkey_previous
+                        } else {
+                            &settings.hotkey_next
+                        }) {
+                            repeat = Some((
+                                msg.wParam,
+                                binding.key,
+                                binding.modifiers,
+                                destination as usize,
+                                Instant::now() + Duration::from_millis(400),
+                            ));
+                        }
+                    }
                 }
                 if msg.message == WM_APP + 2 {
                     let action = msg.lParam as u32 & 0xffff;
@@ -609,6 +640,7 @@ pub fn start(
                 match command {
                     Command::Quit => break 'run,
                     Command::Settings(s) => {
+                        repeat = None;
                         if !demo && hotkeys::validate(&s).is_ok() {
                             for (id, active) in registered.iter_mut().enumerate() {
                                 if *active {
@@ -637,6 +669,19 @@ pub fn start(
                         preview.show(&clip, paste_target, settings.preview_ms, number);
                         pending = Some((clip, plain, old, paste_target));
                     }
+                }
+            }
+            if let Some((id, key, modifiers, destination, next)) = repeat.as_mut() {
+                if !hotkey_held(*key, *modifiers) {
+                    repeat = None;
+                } else if Instant::now() >= *next {
+                    let _ = tx.send(if *id == 2 {
+                        Event::Previous(*destination)
+                    } else {
+                        Event::Next(*destination)
+                    });
+                    ctx.request_repaint();
+                    *next = Instant::now() + Duration::from_millis(120);
                 }
             }
             if released() {
