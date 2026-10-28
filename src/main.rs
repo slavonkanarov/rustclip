@@ -17,6 +17,9 @@ struct App {
     snippets: bool,
     stars: bool,
     settings_open: bool,
+    confirm_discard: bool,
+    focus_settings: u8,
+    settings_last_active: bool,
     settings_page: usize,
     draft: Settings,
     adding_capture: Option<String>,
@@ -252,6 +255,9 @@ impl App {
             snippets: false,
             stars: false,
             settings_open: false,
+            confirm_discard: false,
+            focus_settings: 0,
+            settings_last_active: false,
             settings_page: 0,
             editor: None,
             status: errors.join("\n"),
@@ -376,10 +382,20 @@ impl App {
             }
         }
     }
+    fn close_preferences(&mut self) {
+        if self.draft == self.settings {
+            self.settings_open = false;
+        } else {
+            self.confirm_discard = true;
+        }
+    }
     fn preferences(&mut self, ctx: &egui::Context) {
         if !self.settings_open {
+            self.focus_settings = 0;
             return;
         }
+        let focus_settings = self.focus_settings == 1;
+        self.focus_settings = self.focus_settings.saturating_sub(1);
         ctx.show_viewport_immediate(
             egui::ViewportId::from_hash_of("rustclip-settings"),
             egui::ViewportBuilder::default()
@@ -387,18 +403,21 @@ impl App {
                 .with_inner_size([820., 610.])
                 .with_min_inner_size([600., 420.]),
             |ui, _| {
-                if ui.input(|i| i.viewport().close_requested()) {
-                    self.settings_open = false;
-                    return;
+                if ui.input(|i| i.viewport().focused == Some(true)) {
+                    self.settings_last_active = true;
+                }
+                if focus_settings {
+                    ui.ctx().send_viewport_cmd(egui::ViewportCommand::Focus);
                 }
             ui.painter().rect_filled(ui.max_rect(), 0.0, egui::Color32::from_rgb(24, 24, 24));
             ui.heading(["Общее","Горячие клавиши","История буфера обмена","Настройки вставки","Дополнительно","Фильтрация"][self.settings_page]);
             if !self.status.is_empty() { ui.colored_label(egui::Color32::RED, &self.status); }
             ui.separator();
+            let mut cancel = false;
             egui::Panel::bottom("settings_actions").exact_size(52.).frame(egui::Frame::NONE.inner_margin(egui::Margin::symmetric(8, 8))).show(ui, |ui| {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui.button("Сохранить").clicked(){if let Err(e)=hotkeys::validate(&self.draft){self.status=e;}else{self.draft.recent_apps=self.settings.recent_apps.clone();self.settings=self.draft.clone();self.send(Command::Settings(self.settings.clone()));if let Err(e)=model::write_json(&model::directory().join("settings.json"),&self.settings){self.status=e;}else{self.settings_open=false;}}}
-                    if ui.button("Отмена").clicked(){self.settings_open=false;}
+                    if ui.button("Отмена").clicked(){cancel=true;}
                 });
             });
             egui::ScrollArea::vertical().show(ui, |ui| {
@@ -426,7 +445,7 @@ impl App {
                         }
                         ui.checkbox(&mut self.draft.auto_paste,"Автоматически вставлять после Quick Copy");
                     },
-                    2=>{ui.label("Максимальное количество незакреплённых клипов");ui.add(egui::DragValue::new(&mut self.draft.limit).range(1..=50000));ui.label("Проверять последние клипы на дубликаты");ui.add(egui::DragValue::new(&mut self.draft.duplicates).range(0..=100));ui.checkbox(&mut self.draft.newest_first,"Новые клипы сверху");},
+                    2=>{ui.label("Максимальное количество незакреплённых клипов");ui.add(egui::DragValue::new(&mut self.draft.limit).range(1..=usize::MAX));ui.label("Проверять последние клипы на дубликаты");ui.add(egui::DragValue::new(&mut self.draft.duplicates).range(0..=100));ui.checkbox(&mut self.draft.newest_first,"Новые клипы сверху");},
                     3=>{ui.checkbox(&mut self.draft.ctrl_v,"Эмулировать Ctrl+V (иначе Shift+Insert)");ui.checkbox(&mut self.draft.restore,"Восстанавливать Clipboard после вставки");ui.label("Задержка совместимости, мс");ui.add(egui::DragValue::new(&mut self.draft.paste_delay).range(20..=2000));},
                     4=>{ui.label("Таймер центрального превью, мс (0 — без таймера)");ui.add(egui::DragValue::new(&mut self.draft.preview_ms).range(0..=60000));ui.label("Максимальный текст, KiB");ui.add(egui::DragValue::new(&mut self.draft.max_text_kb).range(1..=32768));ui.label("Esc скрывает центральное превью.");},
                     _=>{
@@ -442,6 +461,36 @@ impl App {
                 }});
             });
             });
+            if cancel {
+                self.close_preferences();
+            } else if ui.input(|i| i.viewport().close_requested()) {
+                ui.ctx().send_viewport_cmd(egui::ViewportCommand::CancelClose);
+                if !self.confirm_discard {
+                    self.close_preferences();
+                }
+            } else if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                if self.confirm_discard {
+                    self.confirm_discard = false;
+                } else {
+                    self.close_preferences();
+                }
+            }
+            if self.confirm_discard {
+                egui::Modal::new(egui::Id::new("discard_settings")).show(ui.ctx(), |ui| {
+                    ui.heading("Закрыть настройки?");
+                    ui.label("Несохранённые изменения будут сброшены.");
+                    ui.horizontal(|ui| {
+                        if ui.button("Сбросить и закрыть").clicked() {
+                            self.draft = self.settings.clone();
+                            self.settings_open = false;
+                            self.confirm_discard = false;
+                        }
+                        if ui.button("Продолжить редактирование").clicked() {
+                            self.confirm_discard = false;
+                        }
+                    });
+                });
+            }
             },
         );
     }
@@ -449,6 +498,9 @@ impl App {
 impl eframe::App for App {
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         ctx.request_repaint_after(std::time::Duration::from_millis(100));
+        if ctx.input(|i| i.viewport().focused == Some(true)) {
+            self.settings_last_active = false;
+        }
         if ctx.input(|i| i.modifiers.alt && i.key_pressed(egui::Key::X)) {
             self.quitting = true;
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
@@ -462,10 +514,12 @@ impl eframe::App for App {
                         .retain(|app| !app.eq_ignore_ascii_case(&path));
                     self.settings.recent_apps.insert(0, path);
                     self.settings.recent_apps.truncate(5);
+                    self.draft.recent_apps = self.settings.recent_apps.clone();
                 }
                 Event::Open => {
                     ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
                     ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+                    self.focus_settings = if self.settings_open && self.settings_last_active { 2 } else { 0 };
                     self.send(Command::HidePreview);
                 }
                 Event::Previous(destination) => self.cycle(&ctx, true, Some(destination)),
