@@ -137,7 +137,7 @@ impl App {
             }
         }
     }
-    fn cycle(&mut self, ctx: &egui::Context, older: bool, destination: Option<usize>) {
+    fn select_adjacent(&mut self, older: bool) -> bool {
         let history: Vec<_> = self
             .clips
             .iter()
@@ -146,7 +146,7 @@ impl App {
             .map(|(i, _)| i)
             .collect();
         if history.is_empty() {
-            return;
+            return false;
         }
         let pos = self
             .selected
@@ -159,6 +159,12 @@ impl App {
                 (pos + 1).min(history.len() - 1)
             }],
         );
+        true
+    }
+    fn cycle(&mut self, ctx: &egui::Context, older: bool, destination: Option<usize>) {
+        if !self.select_adjacent(older) {
+            return;
+        }
         if let Some(clip) = self.selected.and_then(|i| self.clips.get(i)).cloned() {
             if self.settings.auto_paste {
                 self.send(Command::Paste(clip, false, destination));
@@ -515,6 +521,12 @@ impl eframe::App for App {
             }
         }
         if !self.settings_open && self.editor.is_none() && !ctx.egui_wants_keyboard_input() {
+            if ctx.input(|i| i.key_pressed(egui::Key::ArrowUp)) {
+                self.select_adjacent(true);
+            }
+            if ctx.input(|i| i.key_pressed(egui::Key::ArrowDown)) {
+                self.select_adjacent(false);
+            }
             if ctx.input(|i| i.key_pressed(egui::Key::Enter)) {
                 self.action(&ctx, true, ctx.input(|i| i.modifiers.shift));
             }
