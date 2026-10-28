@@ -16,8 +16,8 @@ use windows_sys::Win32::{
 };
 
 pub enum Command {
-    Copy(Clip, bool),
-    Paste(Clip, bool, Option<usize>),
+    Copy(Clip, bool, Option<usize>),
+    Paste(Clip, bool, Option<usize>, Option<usize>),
     Settings(Settings),
     HidePreview,
     Quit,
@@ -526,7 +526,7 @@ pub fn start(
             }
             let mut msg: MSG = std::mem::zeroed();
             while PeekMessageW(&mut msg, null_mut(), 0, 0, PM_REMOVE) != 0 {
-                if msg.hwnd == preview.hwnd && msg.message == WM_PAINT && preview.image.is_some() {
+                if msg.hwnd == preview.hwnd && msg.message == WM_PAINT {
                     let mut ps: PAINTSTRUCT = std::mem::zeroed();
                     let dc = BeginPaint(preview.hwnd, &mut ps);
                     preview.paint(dc);
@@ -617,20 +617,20 @@ pub fn start(
                         settings = s;
                     }
                     Command::HidePreview => preview.hide(),
-                    Command::Copy(clip, plain) => {
+                    Command::Copy(clip, plain, number) => {
                         if let Err(e) = publish(hwnd, &clip, plain) {
                             let _ = tx.send(Event::Error(e));
                         }
-                        preview.show(&clip, target, settings.preview_ms);
+                        preview.show(&clip, target, settings.preview_ms, number);
                     }
-                    Command::Paste(clip, plain, destination) => {
+                    Command::Paste(clip, plain, destination, number) => {
                         let paste_target = destination.map_or(target, |handle| handle as HWND);
                         let old = if settings.restore {
                             capture(hwnd, &settings, true).ok().flatten()
                         } else {
                             None
                         };
-                        preview.show(&clip, paste_target, settings.preview_ms);
+                        preview.show(&clip, paste_target, settings.preview_ms, number);
                         pending = Some((clip, plain, old, paste_target));
                     }
                 }
@@ -727,6 +727,8 @@ unsafe fn register_hotkeys(
 struct Preview {
     hwnd: HWND,
     image: Option<image::RgbaImage>,
+    text: String,
+    number: Option<usize>,
     deadline: Option<Instant>,
 }
 
@@ -781,7 +783,7 @@ impl Preview {
                     WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
                     wide("STATIC").as_ptr(),
                     wide("").as_ptr(),
-                    WS_POPUP | WS_BORDER,
+                    WS_POPUP,
                     0,
                     0,
                     520,
@@ -793,10 +795,18 @@ impl Preview {
                 )
             },
             image: None,
+            text: String::new(),
+            number: None,
             deadline: None,
         }
     }
-    fn show(&mut self, clip: &Clip, target: HWND, timeout: u64) {
+    fn show(&mut self, clip: &Clip, target: HWND, timeout: u64, number: Option<usize>) {
+        self.number = number;
+        self.text = if clip.text.is_empty() {
+            clip.title()
+        } else {
+            clip.text.chars().take(1800).collect()
+        };
         self.image = image::load_from_memory(&clip.png).ok().map(|i| {
             if i.width() > 598 || i.height() > 398 {
                 i.resize(598, 398, image::imageops::FilterType::Lanczos3)
@@ -814,20 +824,9 @@ impl Preview {
                 MonitorFromWindow(target, MONITOR_DEFAULTTONEAREST),
                 &mut info,
             );
-            let (w, h) = if self.image.is_some() {
-                (600, 400)
-            } else {
-                (520, 180)
-            };
-            SetWindowTextW(
-                self.hwnd,
-                wide(&format!(
-                    "RustClip — {}\r\n────────────────────────\r\n{}",
-                    clip.title(),
-                    clip.text.chars().take(1800).collect::<String>()
-                ))
-                .as_ptr(),
-            );
+            let (w, h) = self.image.as_ref().map_or((520, 180), |img| {
+                (img.width() as i32, img.height() as i32 + 42)
+            });
             SetWindowPos(
                 self.hwnd,
                 HWND_TOPMOST,
@@ -846,18 +845,99 @@ impl Preview {
         }
     }
     fn paint(&self, dc: HDC) {
+        unsafe {
+            let mut rect = RECT::default();
+            GetClientRect(self.hwnd, &mut rect);
+            let background = CreateSolidBrush(0x00201d1b);
+            FillRect(dc, &rect, background);
+            DeleteObject(background);
+
+            SetBkMode(dc, TRANSPARENT as i32);
+            let old_font = SelectObject(dc, GetStockObject(DEFAULT_GUI_FONT));
+            SetTextColor(dc, 0x00c6b9ae);
+            let heading = wide("RustClip");
+            let margin = if self.image.is_some() { 8 } else { 24 };
+            let mut header = RECT {
+                left: margin,
+                top: 12,
+                right: rect.right - margin,
+                bottom: 32,
+            };
+            DrawTextW(
+                dc,
+                heading.as_ptr(),
+                -1,
+                &mut header,
+                DT_SINGLELINE | DT_VCENTER,
+            );
+            if let Some(number) = self.number {
+                let label = wide(&format!("№{number}"));
+                DrawTextW(
+                    dc,
+                    label.as_ptr(),
+                    -1,
+                    &mut header,
+                    DT_SINGLELINE | DT_RIGHT | DT_VCENTER,
+                );
+            }
+
+            let accent = CreateSolidBrush(0x00b77c52);
+            let line = RECT {
+                left: margin,
+                top: 40,
+                right: rect.right - margin,
+                bottom: 41,
+            };
+            FillRect(dc, &line, accent);
+            DeleteObject(accent);
+
+            if self.image.is_none() {
+                let body_font = CreateFontW(
+                    -16,
+                    0,
+                    0,
+                    0,
+                    FW_NORMAL as i32,
+                    0,
+                    0,
+                    0,
+                    DEFAULT_CHARSET as u32,
+                    0,
+                    0,
+                    0,
+                    0,
+                    wide("Segoe UI").as_ptr(),
+                );
+                let previous_font = SelectObject(dc, body_font);
+                SetTextColor(dc, 0x00f3efeb);
+                let content = wide(&self.text);
+                let mut body = RECT {
+                    left: 24,
+                    top: 57,
+                    right: rect.right - 24,
+                    bottom: rect.bottom - 20,
+                };
+                DrawTextW(
+                    dc,
+                    content.as_ptr(),
+                    -1,
+                    &mut body,
+                    DT_LEFT | DT_TOP | DT_WORDBREAK | DT_END_ELLIPSIS,
+                );
+                SelectObject(dc, previous_font);
+                DeleteObject(body_font);
+            }
+            SelectObject(dc, old_font);
+        }
         if let Some(img) = &self.image {
             unsafe {
-                let mut rect = RECT::default();
-                GetClientRect(self.hwnd, &mut rect);
-                FillRect(dc, &rect, GetStockObject(WHITE_BRUSH) as HBRUSH);
-                let scale = (rect.right as f32 / img.width() as f32)
-                    .min(rect.bottom as f32 / img.height() as f32)
-                    .min(1.0);
-                let w = (img.width() as f32 * scale) as i32;
-                let h = (img.height() as f32 * scale) as i32;
                 let mut bgra = img.as_raw().clone();
                 for p in bgra.chunks_exact_mut(4) {
+                    let alpha = p[3] as u16;
+                    for (channel, background) in p[..3].iter_mut().zip([27, 29, 32]) {
+                        *channel =
+                            ((*channel as u16 * alpha + background * (255 - alpha)) / 255) as u8;
+                    }
                     p.swap(0, 2);
                 }
                 let bmi = BITMAPINFO {
@@ -874,10 +954,10 @@ impl Preview {
                 };
                 StretchDIBits(
                     dc,
-                    (rect.right - w) / 2,
-                    (rect.bottom - h) / 2,
-                    w,
-                    h,
+                    0,
+                    42,
+                    img.width() as i32,
+                    img.height() as i32,
                     0,
                     0,
                     img.width() as i32,

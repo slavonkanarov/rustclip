@@ -126,11 +126,14 @@ impl App {
         true
     }
     fn action(&mut self, ctx: &egui::Context, paste: bool, plain: bool) {
-        if let Some(clip) = self.selected.and_then(|i| self.clips.get(i)).cloned() {
+        if let Some(i) = self.selected.filter(|&i| i < self.clips.len()) {
+            let clip = self.clips[i].clone();
+            let number =
+                (!clip.snippet).then(|| self.clips[i..].iter().filter(|c| !c.snippet).count());
             if paste {
-                self.send(Command::Paste(clip, plain, None));
+                self.send(Command::Paste(clip, plain, None, number));
             } else {
-                self.send(Command::Copy(clip, plain));
+                self.send(Command::Copy(clip, plain, number));
             }
             if self.settings.hide_after {
                 ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
@@ -165,11 +168,13 @@ impl App {
         if !self.select_adjacent(older) {
             return;
         }
-        if let Some(clip) = self.selected.and_then(|i| self.clips.get(i)).cloned() {
+        if let Some(i) = self.selected.filter(|&i| i < self.clips.len()) {
+            let clip = self.clips[i].clone();
+            let number = Some(self.clips[i..].iter().filter(|c| !c.snippet).count());
             if self.settings.auto_paste {
-                self.send(Command::Paste(clip, false, destination));
+                self.send(Command::Paste(clip, false, destination, number));
             } else {
-                self.send(Command::Copy(clip, false));
+                self.send(Command::Copy(clip, false, number));
             }
             if self.settings.hide_after {
                 ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
@@ -251,6 +256,7 @@ impl eframe::App for App {
                                 clipboard::text_clip(text),
                                 true,
                                 Some(destination),
+                                None,
                             ));
                         }
                     }
