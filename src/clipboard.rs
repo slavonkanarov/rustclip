@@ -24,6 +24,7 @@ pub enum Command {
 }
 pub enum Event {
     Captured(Clip),
+    ActiveApp(String),
     Open,
     Previous(usize),
     Next(usize),
@@ -138,15 +139,17 @@ fn executable(hwnd: HWND) -> String {
     }
 }
 fn excluded(path: &str, list: &str) -> bool {
+    let name = path.rsplit('\\').next().unwrap_or(path);
     list.lines()
         .map(str::trim)
         .filter(|s| !s.is_empty())
         .any(|s| {
             path.eq_ignore_ascii_case(s)
-                || path
-                    .rsplit('\\')
-                    .next()
-                    .is_some_and(|name| name.eq_ignore_ascii_case(s))
+                || name.eq_ignore_ascii_case(s)
+                || (!s.contains('.')
+                    && name.rsplit_once('.').is_some_and(|(stem, ext)| {
+                        ext.eq_ignore_ascii_case("exe") && stem.eq_ignore_ascii_case(s)
+                    }))
         })
 }
 fn format_name(id: u32) -> String {
@@ -509,12 +512,21 @@ pub fn start(
         let mut preview = Preview::new();
         let mut dirty = false;
         let mut last_sequence = GetClipboardSequenceNumber();
+        let mut last_foreground = null_mut();
         'run: loop {
             let foreground = GetForegroundWindow();
             let mut pid = 0;
             GetWindowThreadProcessId(foreground, &mut pid);
             if !foreground.is_null() && pid != std::process::id() {
                 target = foreground;
+                if foreground != last_foreground {
+                    last_foreground = foreground;
+                    let path = executable(foreground);
+                    if !path.is_empty() {
+                        let _ = tx.send(Event::ActiveApp(path));
+                        ctx.request_repaint();
+                    }
+                }
             }
             let mut msg: MSG = std::mem::zeroed();
             while PeekMessageW(&mut msg, null_mut(), 0, 0, PM_REMOVE) != 0 {
@@ -741,6 +753,8 @@ mod tests {
     #[test]
     fn exclusions_match_whole_executable() {
         assert!(excluded("C:\\Games\\PioneerGame.exe", "pioneergame.exe"));
+        assert!(excluded("C:\\Users\\me\\Code.exe", "code"));
+        assert!(!excluded("C:\\Users\\me\\CodeHelper.exe", "code"));
         assert!(!excluded(
             "C:\\Games\\NotPioneerGame.exe",
             "PioneerGame.exe"

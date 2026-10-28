@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::{
     fs,
+    os::windows::ffi::OsStrExt,
     path::PathBuf,
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -59,6 +60,7 @@ pub struct Settings {
     pub newest_first: bool,
     pub excluded_capture: String,
     pub excluded_hotkeys: String,
+    pub recent_apps: Vec<String>,
     pub excluded_formats: String,
     pub hotkey_open: String,
     pub hotkey_previous: String,
@@ -81,6 +83,7 @@ impl Default for Settings {
             newest_first: false,
             excluded_capture: "FactoryGame.exe\nPioneerGame.exe".into(),
             excluded_hotkeys: "rustclip.exe\nPioneerGame.exe".into(),
+            recent_apps: Vec::new(),
             excluded_formats: String::new(),
             hotkey_open: "Ctrl+Shift+D".into(),
             hotkey_previous: "Ctrl+Shift+Up".into(),
@@ -131,7 +134,24 @@ pub fn write_json(path: &std::path::Path, value: &impl Serialize) -> Result<(), 
     let temp = path.with_extension("tmp");
     fs::write(&temp, serde_json::to_vec(value).map_err(|e| e.to_string())?)
         .map_err(|e| e.to_string())?;
-    fs::rename(temp, path).map_err(|e| e.to_string())
+    use windows_sys::Win32::Storage::FileSystem::{MOVEFILE_REPLACE_EXISTING, MoveFileExW};
+    let wide = |path: &std::path::Path| {
+        path.as_os_str()
+            .encode_wide()
+            .chain(Some(0))
+            .collect::<Vec<_>>()
+    };
+    if unsafe {
+        MoveFileExW(
+            wide(&temp).as_ptr(),
+            wide(path).as_ptr(),
+            MOVEFILE_REPLACE_EXISTING,
+        )
+    } == 0
+    {
+        return Err(std::io::Error::last_os_error().to_string());
+    }
+    Ok(())
 }
 pub fn load() -> (Vec<Clip>, Settings, Vec<String>) {
     let mut errors = Vec::new();
@@ -186,5 +206,19 @@ mod tests {
         let s: Settings = serde_json::from_str("{\"monitor\":false}").unwrap();
         assert!(!s.monitor);
         assert_eq!(s.paste_delay, 200);
+    }
+    #[test]
+    fn settings_can_be_saved_again() {
+        let path = std::env::temp_dir().join(format!(
+            "rustclip-settings-test-{}.json",
+            std::process::id()
+        ));
+        let mut settings = Settings::default();
+        write_json(&path, &settings).unwrap();
+        settings.excluded_hotkeys = "Code.exe".into();
+        write_json(&path, &settings).unwrap();
+        let saved: Settings = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        assert_eq!(saved.excluded_hotkeys, "Code.exe");
+        fs::remove_file(path).unwrap();
     }
 }

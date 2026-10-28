@@ -5,7 +5,7 @@ mod model;
 use clipboard::{Command, Event};
 use eframe::egui;
 use model::{Clip, Settings};
-use std::sync::mpsc;
+use std::{collections::HashMap, sync::mpsc};
 
 struct App {
     clips: Vec<Clip>,
@@ -19,10 +19,183 @@ struct App {
     settings_open: bool,
     settings_page: usize,
     draft: Settings,
+    adding_capture: Option<String>,
+    adding_hotkeys: Option<String>,
+    app_icons: HashMap<String, egui::TextureHandle>,
     editor: Option<(Option<usize>, String)>,
     status: String,
     texture: Option<(u128, u32, egui::TextureHandle)>,
     quitting: bool,
+}
+fn exe_icon(path: &str) -> Option<egui::ColorImage> {
+    use windows_sys::Win32::{
+        Graphics::Gdi::*,
+        UI::{Shell::*, WindowsAndMessaging::*},
+    };
+    unsafe {
+        let mut info: SHFILEINFOW = std::mem::zeroed();
+        if SHGetFileInfoW(
+            clipboard::wide(path).as_ptr(),
+            0,
+            &mut info,
+            std::mem::size_of::<SHFILEINFOW>() as u32,
+            SHGFI_ICON | SHGFI_SMALLICON,
+        ) == 0
+        {
+            return None;
+        }
+        let dc = CreateCompatibleDC(std::ptr::null_mut());
+        if dc.is_null() {
+            DestroyIcon(info.hIcon);
+            return None;
+        }
+        let mut bitmap_info: BITMAPINFO = std::mem::zeroed();
+        bitmap_info.bmiHeader.biSize = std::mem::size_of::<BITMAPINFOHEADER>() as u32;
+        bitmap_info.bmiHeader.biWidth = 16;
+        bitmap_info.bmiHeader.biHeight = -16;
+        bitmap_info.bmiHeader.biPlanes = 1;
+        bitmap_info.bmiHeader.biBitCount = 32;
+        bitmap_info.bmiHeader.biCompression = BI_RGB;
+        let mut bits = std::ptr::null_mut();
+        let bitmap = CreateDIBSection(
+            dc,
+            &bitmap_info,
+            DIB_RGB_COLORS,
+            &mut bits,
+            std::ptr::null_mut(),
+            0,
+        );
+        if bitmap.is_null() {
+            DeleteDC(dc);
+            DestroyIcon(info.hIcon);
+            return None;
+        }
+        let old = SelectObject(dc, bitmap);
+        let drawn = DrawIconEx(
+            dc,
+            0,
+            0,
+            info.hIcon,
+            16,
+            16,
+            0,
+            std::ptr::null_mut(),
+            DI_NORMAL,
+        ) != 0;
+        let mut rgba = vec![0; 16 * 16 * 4];
+        if drawn {
+            let pixels = std::slice::from_raw_parts(bits as *const u8, rgba.len());
+            for (source, dest) in pixels.chunks_exact(4).zip(rgba.chunks_exact_mut(4)) {
+                dest.copy_from_slice(&[source[2], source[1], source[0], source[3]]);
+            }
+            if rgba.chunks_exact(4).all(|pixel| pixel[3] == 0) {
+                for pixel in rgba.chunks_exact_mut(4) {
+                    pixel[3] = 255;
+                }
+            }
+        }
+        SelectObject(dc, old);
+        DeleteObject(bitmap);
+        DeleteDC(dc);
+        DestroyIcon(info.hIcon);
+        drawn.then(|| egui::ColorImage::from_rgba_unmultiplied([16, 16], &rgba))
+    }
+}
+
+fn app_icon(ui: &mut egui::Ui, path: &str, icons: &mut HashMap<String, egui::TextureHandle>) {
+    if !icons.contains_key(path) {
+        if let Some(image) = exe_icon(path) {
+            icons.insert(
+                path.into(),
+                ui.ctx().load_texture(path, image, Default::default()),
+            );
+        }
+    }
+    if let Some(icon) = icons.get(path) {
+        ui.add(egui::Image::new(icon).fit_to_exact_size(egui::vec2(16., 16.)));
+    }
+}
+
+fn app_list(
+    ui: &mut egui::Ui,
+    title: &str,
+    entries: &mut String,
+    adding: &mut Option<String>,
+    recent: &[String],
+    icons: &mut HashMap<String, egui::TextureHandle>,
+) {
+    ui.label(title);
+    let mut rows: Vec<String> = entries.lines().map(str::to_owned).collect();
+    let mut changed = false;
+    let mut remove = None;
+    for (index, row) in rows.iter_mut().enumerate() {
+        ui.horizontal(|ui| {
+            if let Some(path) = recent.iter().find(|path| {
+                path.rsplit('\\')
+                    .next()
+                    .is_some_and(|name| name.eq_ignore_ascii_case(row))
+                    || path.eq_ignore_ascii_case(row)
+            }) {
+                app_icon(ui, path, icons);
+            }
+            changed |= ui
+                .add(egui::TextEdit::singleline(row).desired_width(230.))
+                .changed();
+            if ui.small_button("Удалить").clicked() {
+                remove = Some(index);
+            }
+        });
+    }
+    if let Some(index) = remove {
+        rows.remove(index);
+        changed = true;
+    }
+    if changed {
+        *entries = rows.join("\n");
+    }
+    if adding.is_none() && ui.button("+ Добавить приложение").clicked() {
+        *adding = Some(String::new());
+    }
+    let mut close = false;
+    if let Some(value) = adding.as_mut() {
+        ui.horizontal(|ui| {
+            ui.add(
+                egui::TextEdit::singleline(value)
+                    .hint_text("Имя.exe или полный путь")
+                    .desired_width(230.),
+            );
+            if ui.button("Добавить").clicked() && !value.trim().is_empty() {
+                let name = value.trim();
+                if !entries
+                    .lines()
+                    .any(|entry| entry.trim().eq_ignore_ascii_case(name))
+                {
+                    if !entries.is_empty() {
+                        entries.push('\n');
+                    }
+                    entries.push_str(name);
+                }
+                close = true;
+            } else if ui.button("Отмена").clicked() {
+                close = true;
+            }
+        });
+        if !close {
+            ui.label("Последние активные приложения:");
+            for path in recent.iter().take(5) {
+                ui.horizontal(|ui| {
+                    app_icon(ui, path, icons);
+                    let name = path.rsplit('\\').next().unwrap_or(path);
+                    if ui.button(name).on_hover_text(path).clicked() {
+                        *value = name.into();
+                    }
+                });
+            }
+        }
+    }
+    if close {
+        *adding = None;
+    }
 }
 impl App {
     fn new(cc: &eframe::CreationContext<'_>, initial_target: usize) -> Self {
@@ -69,6 +242,9 @@ impl App {
             clips,
             selected,
             draft: settings.clone(),
+            adding_capture: None,
+            adding_hotkeys: None,
+            app_icons: HashMap::new(),
             settings,
             tx,
             rx,
@@ -217,7 +393,15 @@ impl App {
                 }
             ui.painter().rect_filled(ui.max_rect(), 0.0, egui::Color32::from_rgb(24, 24, 24));
             ui.heading(["Общее","Горячие клавиши","История буфера обмена","Настройки вставки","Дополнительно","Фильтрация"][self.settings_page]);
+            if !self.status.is_empty() { ui.colored_label(egui::Color32::RED, &self.status); }
             ui.separator();
+            egui::Panel::bottom("settings_actions").exact_size(52.).frame(egui::Frame::NONE.inner_margin(egui::Margin::symmetric(8, 8))).show(ui, |ui| {
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.button("Сохранить").clicked(){if let Err(e)=hotkeys::validate(&self.draft){self.status=e;}else{self.draft.recent_apps=self.settings.recent_apps.clone();self.settings=self.draft.clone();self.send(Command::Settings(self.settings.clone()));if let Err(e)=model::write_json(&model::directory().join("settings.json"),&self.settings){self.status=e;}else{self.settings_open=false;}}}
+                    if ui.button("Отмена").clicked(){self.settings_open=false;}
+                });
+            });
+            egui::ScrollArea::vertical().show(ui, |ui| {
             ui.horizontal_top(|ui|{
                 ui.vertical(|ui|{ui.set_width(190.);for (i,name) in ["Общее","Горячие клавиши","История буфера обмена","Настройки вставки","Дополнительно","Фильтрация"].iter().enumerate(){ui.selectable_value(&mut self.settings_page,i,*name);}});
                 ui.separator();ui.vertical(|ui|{match self.settings_page {
@@ -236,7 +420,7 @@ impl App {
                                 ui.end_row();
                             }
                         });
-                        ui.label("Пример: Ctrl+Shift+Up. Изменения применяются после OK.");
+                        ui.label("Пример: Ctrl+Shift+Up. Изменения применяются после сохранения.");
                         if let Err(error) = hotkeys::validate(&self.draft) {
                             ui.colored_label(egui::Color32::RED, error);
                         }
@@ -245,10 +429,19 @@ impl App {
                     2=>{ui.label("Максимальное количество незакреплённых клипов");ui.add(egui::DragValue::new(&mut self.draft.limit).range(1..=50000));ui.label("Проверять последние клипы на дубликаты");ui.add(egui::DragValue::new(&mut self.draft.duplicates).range(0..=100));ui.checkbox(&mut self.draft.newest_first,"Новые клипы сверху");},
                     3=>{ui.checkbox(&mut self.draft.ctrl_v,"Эмулировать Ctrl+V (иначе Shift+Insert)");ui.checkbox(&mut self.draft.restore,"Восстанавливать Clipboard после вставки");ui.label("Задержка совместимости, мс");ui.add(egui::DragValue::new(&mut self.draft.paste_delay).range(20..=2000));},
                     4=>{ui.label("Таймер центрального превью, мс (0 — без таймера)");ui.add(egui::DragValue::new(&mut self.draft.preview_ms).range(0..=60000));ui.label("Максимальный текст, KiB");ui.add(egui::DragValue::new(&mut self.draft.max_text_kb).range(1..=32768));ui.label("Esc скрывает центральное превью.");},
-                    _=>{ui.label("Один exe или полный путь на строку. Без wildcard.");ui.label("Не захватывать из приложений:");ui.text_edit_multiline(&mut self.draft.excluded_capture);ui.label("Игнорировать hotkeys в приложениях:");ui.text_edit_multiline(&mut self.draft.excluded_hotkeys);ui.label("Дополнительные исключённые имена/ID форматов:");ui.text_edit_multiline(&mut self.draft.excluded_formats);ui.label("Базовый список проблемных форматов встроен; читаются только поддерживаемые форматы.");}
+                    _=>{
+                        ui.label("Имя приложения (с .exe или без) или полный путь.");
+                        app_list(ui, "Не захватывать из приложений:", &mut self.draft.excluded_capture, &mut self.adding_capture, &self.settings.recent_apps, &mut self.app_icons);
+                        ui.separator();
+                        app_list(ui, "Игнорировать горячие клавиши в приложениях:", &mut self.draft.excluded_hotkeys, &mut self.adding_hotkeys, &self.settings.recent_apps, &mut self.app_icons);
+                        ui.separator();
+                        ui.label("Дополнительные исключённые имена/ID форматов:");
+                        ui.text_edit_multiline(&mut self.draft.excluded_formats);
+                        ui.label("Базовый список проблемных форматов встроен; читаются только поддерживаемые форматы.");
+                    }
                 }});
             });
-            ui.separator();ui.horizontal(|ui|{if ui.button("OK").clicked(){if let Err(e)=hotkeys::validate(&self.draft){self.status=e;}else{self.settings=self.draft.clone();self.send(Command::Settings(self.settings.clone()));if let Err(e)=model::write_json(&model::directory().join("settings.json"),&self.settings){self.status=e;}else{self.settings_open=false;}}}if ui.button("Отмена").clicked(){self.settings_open=false;}});
+            });
             },
         );
     }
@@ -263,6 +456,13 @@ impl eframe::App for App {
         while let Ok(event) = self.rx.try_recv() {
             match event {
                 Event::Captured(clip) => self.add(clip),
+                Event::ActiveApp(path) => {
+                    self.settings
+                        .recent_apps
+                        .retain(|app| !app.eq_ignore_ascii_case(&path));
+                    self.settings.recent_apps.insert(0, path);
+                    self.settings.recent_apps.truncate(5);
+                }
                 Event::Open => {
                     ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
                     ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
