@@ -526,6 +526,13 @@ pub fn start(
             }
             let mut msg: MSG = std::mem::zeroed();
             while PeekMessageW(&mut msg, null_mut(), 0, 0, PM_REMOVE) != 0 {
+                if msg.hwnd == preview.hwnd && msg.message == WM_PAINT && preview.image.is_some() {
+                    let mut ps: PAINTSTRUCT = std::mem::zeroed();
+                    let dc = BeginPaint(preview.hwnd, &mut ps);
+                    preview.paint(dc);
+                    EndPaint(preview.hwnd, &ps);
+                    continue;
+                }
                 if msg.message == WM_CLIPBOARDUPDATE {
                     dirty = true;
                 }
@@ -790,9 +797,14 @@ impl Preview {
         }
     }
     fn show(&mut self, clip: &Clip, target: HWND, timeout: u64) {
-        self.image = image::load_from_memory(&clip.png)
-            .ok()
-            .map(|i| i.to_rgba8());
+        self.image = image::load_from_memory(&clip.png).ok().map(|i| {
+            if i.width() > 598 || i.height() > 398 {
+                i.resize(598, 398, image::imageops::FilterType::Lanczos3)
+                    .to_rgba8()
+            } else {
+                i.to_rgba8()
+            }
+        });
         unsafe {
             let mut info = MONITORINFO {
                 cbSize: std::mem::size_of::<MONITORINFO>() as u32,
@@ -827,12 +839,15 @@ impl Preview {
             );
         }
         self.deadline = (timeout > 0).then(|| Instant::now() + Duration::from_millis(timeout));
-        self.paint();
+        unsafe {
+            let dc = GetDC(self.hwnd);
+            self.paint(dc);
+            ReleaseDC(self.hwnd, dc);
+        }
     }
-    fn paint(&self) {
+    fn paint(&self, dc: HDC) {
         if let Some(img) = &self.image {
             unsafe {
-                let dc = GetDC(self.hwnd);
                 let mut rect = RECT::default();
                 GetClientRect(self.hwnd, &mut rect);
                 FillRect(dc, &rect, GetStockObject(WHITE_BRUSH) as HBRUSH);
@@ -872,7 +887,6 @@ impl Preview {
                     DIB_RGB_COLORS,
                     SRCCOPY,
                 );
-                ReleaseDC(self.hwnd, dc);
             }
         }
     }
@@ -886,8 +900,6 @@ impl Preview {
     fn tick(&mut self) {
         if self.deadline.is_some_and(|d| Instant::now() >= d) {
             self.hide();
-        } else {
-            self.paint();
         }
     }
 }

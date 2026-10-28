@@ -21,7 +21,7 @@ struct App {
     draft: Settings,
     editor: Option<(Option<usize>, String)>,
     status: String,
-    texture: Option<(u128, egui::TextureHandle)>,
+    texture: Option<(u128, u32, egui::TextureHandle)>,
     quitting: bool,
 }
 impl App {
@@ -475,12 +475,26 @@ impl eframe::App for App {
                         .join(", ")
                 ));
                 if !c.png.is_empty() {
-                    if self.texture.as_ref().map(|t| t.0) != Some(c.id) {
+                    let width =
+                        (cols[1].available_width() * ctx.pixels_per_point()).max(1.0) as u32;
+                    if self.texture.as_ref().map(|t| (t.0, t.1)) != Some((c.id, width)) {
                         if let Ok(img) = image::load_from_memory(&c.png) {
+                            let img = if img.width() > width {
+                                img.resize(
+                                    width,
+                                    ((img.height() as f64 * width as f64 / img.width() as f64)
+                                        .round() as u32)
+                                        .max(1),
+                                    image::imageops::FilterType::Lanczos3,
+                                )
+                            } else {
+                                img
+                            };
                             let img = img.to_rgba8();
                             let size = [img.width() as usize, img.height() as usize];
                             self.texture = Some((
                                 c.id,
+                                width,
                                 ctx.load_texture(
                                     "preview",
                                     egui::ColorImage::from_rgba_unmultiplied(size, img.as_raw()),
@@ -489,7 +503,7 @@ impl eframe::App for App {
                             ));
                         }
                     }
-                    if let Some((_, tex)) = &self.texture {
+                    if let Some((_, _, tex)) = &self.texture {
                         cols[1].add(egui::Image::new(tex).fit_to_exact_size(
                             tex.size_vec2()
                                 * (cols[1].available_width() / tex.size_vec2().x).min(1.),
