@@ -26,8 +26,27 @@ struct App {
 }
 impl App {
     fn new(cc: &eframe::CreationContext<'_>, initial_target: usize) -> Self {
-        cc.egui_ctx.set_theme(egui::ThemePreference::Light);
-        cc.egui_ctx.set_visuals(egui::Visuals::light());
+        cc.egui_ctx.set_theme(egui::ThemePreference::Dark);
+        let mut visuals = egui::Visuals::dark();
+        visuals.panel_fill = egui::Color32::from_rgb(24, 24, 24);
+        visuals.window_fill = egui::Color32::from_rgb(24, 24, 24);
+        visuals.extreme_bg_color = egui::Color32::from_rgb(17, 17, 17);
+        visuals.selection.bg_fill = egui::Color32::from_rgb(38, 120, 155);
+        for widget in [
+            &mut visuals.widgets.inactive,
+            &mut visuals.widgets.hovered,
+            &mut visuals.widgets.active,
+        ] {
+            widget.corner_radius = egui::CornerRadius::same(5);
+        }
+        visuals.widgets.inactive.bg_fill = egui::Color32::from_rgb(43, 45, 47);
+        visuals.widgets.hovered.bg_fill = egui::Color32::from_rgb(55, 59, 62);
+        visuals.widgets.active.bg_fill = egui::Color32::from_rgb(38, 120, 155);
+        cc.egui_ctx.set_visuals(visuals);
+        cc.egui_ctx.style_mut_of(egui::Theme::Dark, |style| {
+            style.spacing.button_padding = egui::vec2(10.0, 5.0);
+            style.spacing.item_spacing = egui::vec2(8.0, 7.0);
+        });
         let (mut clips, mut settings, errors) = model::load();
         if std::env::args().any(|s| s == "--demo") {
             settings.monitor = false;
@@ -196,7 +215,9 @@ impl App {
                     self.settings_open = false;
                     return;
                 }
-            egui::Frame::new().fill(egui::Color32::from_rgb(255,195,35)).show(ui,|ui|{ui.set_width(ui.available_width());ui.vertical_centered(|ui|{ui.heading(["Общее","Горячие клавиши","История буфера обмена","Настройки вставки","Дополнительно","Фильтрация"][self.settings_page]);});});
+            ui.painter().rect_filled(ui.max_rect(), 0.0, egui::Color32::from_rgb(24, 24, 24));
+            ui.heading(["Общее","Горячие клавиши","История буфера обмена","Настройки вставки","Дополнительно","Фильтрация"][self.settings_page]);
+            ui.separator();
             ui.horizontal_top(|ui|{
                 ui.vertical(|ui|{ui.set_width(190.);for (i,name) in ["Общее","Горячие клавиши","История буфера обмена","Настройки вставки","Дополнительно","Фильтрация"].iter().enumerate(){ui.selectable_value(&mut self.settings_page,i,*name);}});
                 ui.separator();ui.vertical(|ui|{match self.settings_page {
@@ -283,7 +304,7 @@ impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         ui.painter()
-            .rect_filled(ui.max_rect(), 0.0, egui::Color32::from_rgb(245, 245, 245));
+            .rect_filled(ui.max_rect(), 0.0, egui::Color32::from_rgb(24, 24, 24));
         egui::MenuBar::new().ui(ui, |ui| {
             ui.menu_button("Файл", |ui| {
                 if ui
@@ -385,7 +406,10 @@ impl eframe::App for App {
         });
         ui.separator();
         ui.horizontal(|ui| {
-            if ui.button("Вставить").clicked() {
+            if ui
+                .add(egui::Button::new("Вставить").fill(egui::Color32::from_rgb(38, 120, 155)))
+                .clicked()
+            {
                 self.action(&ctx, true, false);
             }
             if ui.button("Копировать").clicked() {
@@ -394,10 +418,10 @@ impl eframe::App for App {
             if ui.button("Текст").clicked() {
                 self.action(&ctx, true, true);
             }
-            if ui.button("↑").clicked() {
+            if ui.button("↑").on_hover_text("Предыдущий клип").clicked() {
                 self.cycle(&ctx, true, None);
             }
-            if ui.button("↓").clicked() {
+            if ui.button("↓").on_hover_text("Следующий клип").clicked() {
                 self.cycle(&ctx, false, None);
             }
             if ui.button("Удалить").clicked() {
@@ -416,7 +440,7 @@ impl eframe::App for App {
         ui.horizontal(|ui| {
             ui.label("Поиск:");
             ui.text_edit_singleline(&mut self.query);
-            if ui.button("×").clicked() {
+            if ui.button("Очистить").clicked() {
                 self.query.clear();
             }
         });
@@ -639,6 +663,10 @@ fn main() -> eframe::Result {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("RustClip (История буфера обмена)")
+            .with_icon(
+                eframe::icon_data::from_png_bytes(include_bytes!("../assets/icon.png"))
+                    .expect("valid app icon"),
+            )
             .with_inner_size([1080., 800.]),
         ..Default::default()
     };

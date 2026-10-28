@@ -37,21 +37,13 @@ pub fn wide(s: &str) -> Vec<u16> {
 
 fn tray_icon(instance: HINSTANCE) -> HICON {
     let mask = [0u8; 32];
-    let mut pixels = [0u8; 16 * 16 * 4];
-    for y in 0..16 {
-        for x in 0..16 {
-            let paper = (5..=12).contains(&x) && (3..=12).contains(&y);
-            let line = (7..=10).contains(&x) && (6..=7).contains(&y)
-                || (7..=10).contains(&x) && (9..=10).contains(&y);
-            let color: [u8; 4] = if line {
-                [105, 0, 105, 255]
-            } else if paper {
-                [255, 255, 255, 255]
-            } else {
-                [125, 0, 125, 255]
-            };
-            pixels[(y * 16 + x) * 4..(y * 16 + x + 1) * 4].copy_from_slice(&color);
-        }
+    let mut pixels = image::load_from_memory(include_bytes!("../assets/icon.png"))
+        .expect("valid app icon")
+        .resize_exact(16, 16, image::imageops::FilterType::Lanczos3)
+        .to_rgba8()
+        .into_raw();
+    for pixel in pixels.chunks_exact_mut(4) {
+        pixel.swap(0, 2);
     }
     unsafe { CreateIcon(instance, 16, 16, 1, 32, mask.as_ptr(), pixels.as_ptr()) }
 }
