@@ -2,10 +2,12 @@
 mod clipboard;
 mod hotkeys;
 mod model;
+mod secrets;
 use clipboard::{Command, Event};
 use eframe::egui;
 use model::{Clip, Settings};
 use std::{collections::HashMap, sync::mpsc};
+use zeroize::Zeroize;
 
 struct App {
     clips: Vec<Clip>,
@@ -15,6 +17,19 @@ struct App {
     selected: Option<usize>,
     query: String,
     snippets: bool,
+    vault: Option<secrets::VaultData>,
+    credential: String,
+    credential_input: String,
+    credential_confirm: String,
+    pin_mode: bool,
+    secret_editor: Option<secrets::Secret>,
+    secret_selected: Option<usize>,
+    folder_editor: Option<secrets::Folder>,
+    folder_edit_original: Option<String>,
+    selected_folder: Option<String>,
+    secret_app_filter: String,
+    filter_active_app: bool,
+    pending_app: String,
     stars: bool,
     settings_open: bool,
     confirm_discard: bool,
@@ -200,7 +215,747 @@ fn app_list(
         *adding = None;
     }
 }
+fn secret_app_picker(
+    ui: &mut egui::Ui,
+    app: &mut String,
+    recent: &[String],
+    icons: &mut HashMap<String, egui::TextureHandle>,
+) {
+    ui.horizontal(|ui| {
+        ui.label(if app.is_empty() {
+            "Приложение: не выбрано"
+        } else {
+            app.as_str()
+        });
+        ui.menu_button("Выбрать приложение…", |ui| {
+            ui.label("Имя.exe или полный путь");
+            ui.text_edit_singleline(app);
+            ui.separator();
+            ui.label("Последние 5 приложений");
+            for path in recent.iter().take(5) {
+                ui.horizontal(|ui| {
+                    app_icon(ui, path, icons);
+                    let name = path.rsplit('\\').next().unwrap_or(path);
+                    if ui.button(name).on_hover_text(path).clicked() {
+                        *app = name.into();
+                        ui.close();
+                    }
+                });
+            }
+        });
+        if !app.is_empty()
+            && ui
+                .small_button("×")
+                .on_hover_text("Убрать привязку")
+                .clicked()
+        {
+            app.clear();
+        }
+    });
+}
+fn has_secret_for_app(vault: &secrets::VaultData, app: &str) -> bool {
+    !app.is_empty()
+        && vault
+            .iter()
+            .any(|secret| clipboard::app_matches(app, vault.app_for(secret)))
+}
+#[cfg(test)]
+mod secret_routing_tests {
+    use super::*;
+
+    #[test]
+    fn hotkey_routes_only_for_matching_app() {
+        let vault = secrets::VaultData {
+            secrets: vec![secrets::Secret {
+                name: "Вход".into(),
+                value: "secret".into(),
+                app: String::new(),
+                folder: "Работа".into(),
+                hidden: true,
+            }],
+            folders: vec![secrets::Folder {
+                name: "Работа".into(),
+                app: "Code.exe".into(),
+            }],
+        };
+        assert!(has_secret_for_app(&vault, "C:\\Apps\\Code.exe"));
+        assert!(!has_secret_for_app(&vault, "C:\\Apps\\Explorer.exe"));
+        assert!(!has_secret_for_app(&vault, ""));
+    }
+}
 impl App {
+    fn select_first_folder(&mut self) {
+        if let Some(vault) = &self.vault {
+            if !self
+                .selected_folder
+                .as_ref()
+                .is_some_and(|name| vault.folders.iter().any(|folder| folder.name == *name))
+            {
+                self.selected_folder = vault.folders.first().map(|folder| folder.name.clone());
+            }
+        }
+    }
+    fn save_secrets(&mut self) {
+        if let Some(vault) = &self.vault {
+            if let Err(e) = secrets::save(&self.credential, self.pin_mode, vault) {
+                self.status = e;
+            }
+        }
+    }
+    fn migrate_templates(&mut self) {
+        let templates: Vec<_> = self
+            .clips
+            .iter()
+            .filter(|clip| clip.snippet)
+            .cloned()
+            .collect();
+        if templates.is_empty() {
+            return;
+        }
+        let vault = self.vault.as_mut().unwrap();
+        let folder = vault.import_folder();
+        vault.extend(templates.iter().map(|clip| secrets::Secret {
+            name: if clip.label.is_empty() {
+                clip.title()
+            } else {
+                clip.label.clone()
+            },
+            value: clip.text.clone(),
+            app: String::new(),
+            folder: folder.clone(),
+            hidden: true,
+        }));
+        if let Err(e) = secrets::save(&self.credential, self.pin_mode, vault) {
+            let original_len = vault.len() - templates.len();
+            vault.truncate(original_len);
+            self.status = e;
+            return;
+        }
+        for clip in templates {
+            let path = model::directory()
+                .join("clips")
+                .join(format!("{}.json", clip.id));
+            if let Err(e) = std::fs::remove_file(path) {
+                self.status = e.to_string();
+            }
+        }
+        self.clips.retain(|clip| !clip.snippet);
+        self.selected = self.clips.len().checked_sub(1);
+    }
+    fn lock_secrets(&mut self) {
+        self.clear_secret_view();
+        self.credential.zeroize();
+        self.credential_input.zeroize();
+        self.credential_confirm.zeroize();
+        self.secret_selected = None;
+        self.selected_folder = None;
+        self.folder_edit_original = None;
+    }
+    fn clear_secret_view(&mut self) {
+        if let Some(mut vault) = self.vault.take() {
+            for secret in &mut vault.secrets {
+                secret.clear();
+            }
+            for folder in &mut vault.folders {
+                folder.name.zeroize();
+                folder.app.zeroize();
+            }
+        }
+        if let Some(mut secret) = self.secret_editor.take() {
+            secret.clear();
+        }
+        if let Some(mut folder) = self.folder_editor.take() {
+            folder.name.zeroize();
+            folder.app.zeroize();
+        }
+    }
+    fn secret_action(&mut self, ctx: &egui::Context, paste: bool) {
+        if let Some(secret) = self
+            .vault
+            .as_ref()
+            .and_then(|v| self.secret_selected.and_then(|i| v.get(i)))
+        {
+            self.send(Command::Secret(
+                clipboard::text_clip(secret.value.clone()),
+                paste,
+            ));
+            if paste && self.settings.hide_after {
+                ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
+            }
+        }
+    }
+    fn setup_secrets_ui(&mut self, ui: &mut egui::Ui) {
+        if secrets::exists() {
+            ui.label("Шифрование секретов настроено.");
+            ui.label(if self.pin_mode {
+                "Способ защиты: PIN"
+            } else {
+                "Способ защиты: пароль"
+            });
+            if ui.button("Сбросить разблокировку").clicked() {
+                self.lock_secrets();
+            }
+            return;
+        }
+        ui.label("Создать зашифрованное хранилище секретов");
+        ui.horizontal(|ui| {
+            ui.radio_value(&mut self.pin_mode, true, "PIN");
+            ui.radio_value(&mut self.pin_mode, false, "Пароль");
+        });
+        ui.label(if self.pin_mode {
+            "PIN (минимум 4 цифры)"
+        } else {
+            "Пароль"
+        });
+        ui.add(egui::TextEdit::singleline(&mut self.credential_input).password(true));
+        ui.label("Повторите PIN или пароль");
+        ui.add(egui::TextEdit::singleline(&mut self.credential_confirm).password(true));
+        if ui.button("Создать хранилище").clicked() {
+            if self.credential_input != self.credential_confirm {
+                self.status = "PIN или пароль не совпадают".into();
+            } else if self.credential_input.is_empty()
+                || self.pin_mode
+                    && (!self.credential_input.bytes().all(|b| b.is_ascii_digit())
+                        || self.credential_input.len() < 4)
+            {
+                self.status = "PIN: минимум 4 цифры; пароль не должен быть пустым".into();
+            } else {
+                match secrets::save(
+                    &self.credential_input,
+                    self.pin_mode,
+                    &secrets::VaultData::default(),
+                ) {
+                    Ok(()) => {
+                        self.credential = std::mem::take(&mut self.credential_input);
+                        self.credential_confirm.clear();
+                        self.vault = Some(secrets::VaultData::default());
+                        self.status.clear();
+                        self.migrate_templates();
+                        self.clear_secret_view();
+                    }
+                    Err(e) => self.status = e,
+                }
+            }
+        }
+    }
+    fn secrets_ui(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
+        if !secrets::exists() {
+            ui.colored_label(egui::Color32::YELLOW, "Защита секретов не настроена. Добавьте PIN или пароль в Настройках → Секреты. До настройки секреты не сохраняются.");
+            if ui.button("Открыть настройки секретов").clicked() {
+                self.draft = self.settings.clone();
+                self.settings_page = 6;
+                self.settings_open = true;
+            }
+            return;
+        }
+        if self.vault.is_none() && !self.credential.is_empty() {
+            match secrets::unlock(&self.credential) {
+                Ok(vault) => {
+                    self.vault = Some(vault);
+                    self.select_first_folder();
+                }
+                Err(e) => {
+                    self.lock_secrets();
+                    self.status = e;
+                }
+            }
+        }
+        if self.vault.is_none() {
+            ui.heading("Разблокировать секреты");
+            if let Ok(pin) = secrets::mode() {
+                ui.label(if pin {
+                    "Введите PIN"
+                } else {
+                    "Введите пароль"
+                });
+            }
+            let response =
+                ui.add(egui::TextEdit::singleline(&mut self.credential_input).password(true));
+            if ui.button("Разблокировать").clicked()
+                || response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter))
+            {
+                if self.credential_input.is_empty() {
+                    self.status = "Введите PIN или пароль".into();
+                } else {
+                    let result = secrets::unlock(&self.credential_input);
+                    match result {
+                        Ok(vault) => {
+                            self.status.clear();
+                            self.vault = Some(vault);
+                            self.credential = std::mem::take(&mut self.credential_input);
+                            if let Ok(pin) = secrets::mode() {
+                                self.pin_mode = pin;
+                            }
+                            self.migrate_templates();
+                            self.select_first_folder();
+                        }
+                        Err(e) => self.status = e,
+                    }
+                }
+            }
+            return;
+        }
+        ui.horizontal(|ui| {
+            ui.heading("Секреты");
+            if ui
+                .add_enabled(
+                    self.selected_folder.is_some()
+                        && !self.filter_active_app
+                        && self.secret_app_filter.is_empty(),
+                    egui::Button::new("+ Новый секрет").fill(egui::Color32::from_rgb(38, 120, 155)),
+                )
+                .clicked()
+            {
+                self.status.clear();
+                self.secret_selected = None;
+                self.secret_editor = Some(secrets::Secret {
+                    name: String::new(),
+                    value: String::new(),
+                    app: String::new(),
+                    folder: self.selected_folder.clone().unwrap_or_default(),
+                    hidden: true,
+                });
+            }
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui.button("Заблокировать").clicked() {
+                    self.lock_secrets();
+                }
+            });
+        });
+        if self.vault.is_none() {
+            return;
+        }
+        let mut paste = false;
+        let mut copy = false;
+        let mut edit = false;
+        let mut delete = false;
+        let mut toggle_visibility = None;
+        egui::Panel::left("secret_folders")
+            .exact_size(190.)
+            .show(ui, |ui| {
+                ui.heading("Папки");
+                if ui.button("+ Новая папка").clicked() {
+                    self.status.clear();
+                    self.folder_edit_original = None;
+                    self.folder_editor = Some(secrets::Folder {
+                        name: String::new(),
+                        app: String::new(),
+                    });
+                }
+                ui.separator();
+                ui.vertical(|ui| {
+                    for folder in &self.vault.as_ref().unwrap().folders {
+                        if ui
+                            .selectable_value(
+                                &mut self.selected_folder,
+                                Some(folder.name.clone()),
+                                format!("📁 {}", folder.name),
+                            )
+                            .clicked()
+                        {
+                            self.filter_active_app = false;
+                            self.secret_app_filter.clear();
+                        }
+                    }
+                });
+                if let Some(name) = self.selected_folder.as_ref().cloned() {
+                    ui.vertical(|ui| {
+                        if ui.button("Изменить папку").clicked() {
+                            self.folder_edit_original = Some(name.clone());
+                            self.folder_editor = self
+                                .vault
+                                .as_ref()
+                                .unwrap()
+                                .folders
+                                .iter()
+                                .find(|folder| folder.name == name)
+                                .cloned();
+                        }
+                        if ui.button("Удалить папку").clicked() {
+                            if self
+                                .vault
+                                .as_ref()
+                                .unwrap()
+                                .iter()
+                                .any(|secret| secret.folder == name)
+                            {
+                                self.status =
+                                    "Сначала переместите или удалите секреты из папки".into();
+                            } else {
+                                self.vault
+                                    .as_mut()
+                                    .unwrap()
+                                    .folders
+                                    .retain(|folder| folder.name != name);
+                                self.selected_folder = self
+                                    .vault
+                                    .as_ref()
+                                    .unwrap()
+                                    .folders
+                                    .first()
+                                    .map(|folder| folder.name.clone());
+                                self.save_secrets();
+                            }
+                        }
+                    });
+                }
+            });
+        egui::CentralPanel::default().show(ui, |ui| {
+            ui.separator();
+            ui.heading(
+                if self.filter_active_app || !self.secret_app_filter.is_empty() {
+                    "Поиск по приложению"
+                } else {
+                    self.selected_folder.as_deref().unwrap_or("Создайте папку")
+                },
+            );
+            ui.horizontal_wrapped(|ui| {
+                ui.add(egui::TextEdit::singleline(&mut self.query).hint_text("Поиск по названию"));
+                if ui
+                    .add(
+                        egui::TextEdit::singleline(&mut self.secret_app_filter)
+                            .hint_text("Поиск по приложению"),
+                    )
+                    .changed()
+                {
+                    self.filter_active_app = false;
+                }
+                if ui.button("Очистить").clicked() {
+                    self.query.clear();
+                    self.secret_app_filter.clear();
+                    self.filter_active_app = false;
+                    self.select_first_folder();
+                }
+            });
+            let mut visible = 0;
+            egui::ScrollArea::vertical()
+                .max_height(ui.available_height().max(250.))
+                .show(ui, |ui| {
+                    ui.vertical(|ui| {
+                        for (i, secret) in self.vault.as_ref().unwrap().iter().enumerate() {
+                            if !self.filter_active_app
+                                && self.secret_app_filter.is_empty()
+                                && self.selected_folder.as_ref() != Some(&secret.folder)
+                            {
+                                continue;
+                            }
+                            if !secret
+                                .name
+                                .to_lowercase()
+                                .contains(&self.query.to_lowercase())
+                                || if self.filter_active_app {
+                                    !clipboard::app_matches(
+                                        &self.pending_app,
+                                        self.vault.as_ref().unwrap().app_for(secret),
+                                    )
+                                } else {
+                                    !self
+                                        .vault
+                                        .as_ref()
+                                        .unwrap()
+                                        .app_for(secret)
+                                        .to_lowercase()
+                                        .contains(&self.secret_app_filter.to_lowercase())
+                                }
+                            {
+                                continue;
+                            }
+                            visible += 1;
+                            egui::Frame::group(ui.style())
+                                .corner_radius(egui::CornerRadius::same(8))
+                                .inner_margin(egui::Margin::same(12))
+                                .fill(if self.secret_selected == Some(i) {
+                                    egui::Color32::from_rgb(32, 58, 70)
+                                } else {
+                                    egui::Color32::from_rgb(37, 40, 43)
+                                })
+                                .show(ui, |ui| {
+                                    ui.set_width((ui.available_width() - 24.).max(120.).min(700.));
+                                    ui.set_min_height(110.);
+                                    let response = ui.add(
+                                        egui::Label::new(&secret.name)
+                                            .truncate()
+                                            .sense(egui::Sense::click()),
+                                    );
+                                    if response.clicked() {
+                                        self.secret_selected = Some(i);
+                                    }
+                                    if response.double_clicked() {
+                                        self.secret_selected = Some(i);
+                                        paste = true;
+                                    }
+                                    if secret.hidden {
+                                        ui.label("Значение: ••••••••");
+                                    } else {
+                                        ui.add(
+                                            egui::Label::new(format!(
+                                                "Значение: {}",
+                                                secret.value.replace(['\r', '\n'], " ")
+                                            ))
+                                            .truncate(),
+                                        );
+                                    }
+                                    let app = self.vault.as_ref().unwrap().app_for(secret);
+                                    if !app.is_empty() {
+                                        ui.add(
+                                            egui::Label::new(format!(
+                                                "{}: {app}",
+                                                if secret.app.is_empty() {
+                                                    "Приложение папки"
+                                                } else {
+                                                    "Приложение"
+                                                }
+                                            ))
+                                            .truncate(),
+                                        );
+                                    }
+                                    if !secret.folder.is_empty() {
+                                        ui.add(
+                                            egui::Label::new(format!("📁 {}", secret.folder))
+                                                .truncate(),
+                                        );
+                                    }
+                                    ui.horizontal(|ui| {
+                                        if ui.small_button("Вставить").clicked() {
+                                            self.secret_selected = Some(i);
+                                            paste = true;
+                                        }
+                                        if ui.small_button("Копировать").clicked() {
+                                            self.secret_selected = Some(i);
+                                            copy = true;
+                                        }
+                                    });
+                                    ui.horizontal(|ui| {
+                                        if ui
+                                            .small_button(if secret.hidden {
+                                                "Показать"
+                                            } else {
+                                                "Скрыть"
+                                            })
+                                            .clicked()
+                                        {
+                                            toggle_visibility = Some(i);
+                                        }
+                                        if ui.small_button("Изменить").clicked() {
+                                            self.secret_selected = Some(i);
+                                            edit = true;
+                                        }
+                                        if ui.small_button("Удалить").clicked() {
+                                            self.secret_selected = Some(i);
+                                            delete = true;
+                                        }
+                                    });
+                                });
+                        }
+                    });
+                });
+            if visible == 0 {
+                ui.label(if self.vault.as_ref().unwrap().folders.is_empty() {
+                    "Создайте первую папку слева, затем добавьте секрет."
+                } else if self.vault.as_ref().unwrap().is_empty() {
+                    "В папке пока нет секретов. Нажмите «+ Новый секрет»."
+                } else {
+                    "В этой папке или по этому запросу секретов нет."
+                });
+            }
+        });
+        if paste {
+            self.secret_action(ctx, true);
+        }
+        if copy {
+            self.secret_action(ctx, false);
+        }
+        if let Some(i) = toggle_visibility {
+            if let Some(secret) = self.vault.as_mut().and_then(|vault| vault.get_mut(i)) {
+                secret.hidden = !secret.hidden;
+                self.save_secrets();
+            }
+        }
+        if edit {
+            self.secret_editor = self
+                .vault
+                .as_ref()
+                .and_then(|v| self.secret_selected.and_then(|i| v.get(i)))
+                .cloned();
+        }
+        if delete {
+            if let Some(i) = self.secret_selected.take() {
+                if i < self.vault.as_ref().unwrap().len() {
+                    self.vault.as_mut().unwrap().remove(i).clear();
+                    self.save_secrets();
+                }
+            }
+        }
+        if self.folder_editor.is_some() {
+            egui::Modal::new(egui::Id::new("folder_editor")).show(ctx, |ui| {
+                ui.set_min_width(400.);
+                if let Some(folder) = &mut self.folder_editor {
+                    ui.heading(if self.folder_edit_original.is_some() {
+                        "Изменить папку"
+                    } else {
+                        "Новая папка"
+                    });
+                    ui.label("Название папки");
+                    ui.add(
+                        egui::TextEdit::singleline(&mut folder.name).desired_width(f32::INFINITY),
+                    );
+                    secret_app_picker(
+                        ui,
+                        &mut folder.app,
+                        &self.settings.recent_apps,
+                        &mut self.app_icons,
+                    );
+                    ui.separator();
+                    let mut save = false;
+                    ui.horizontal(|ui| {
+                        save = ui
+                            .add(
+                                egui::Button::new("Сохранить папку")
+                                    .fill(egui::Color32::from_rgb(38, 120, 155)),
+                            )
+                            .clicked();
+                        if ui.button("Отмена").clicked() {
+                            self.folder_editor = None;
+                            self.folder_edit_original = None;
+                        }
+                    });
+                    if save {
+                        let folder = self.folder_editor.take().unwrap();
+                        if folder.name.trim().is_empty() {
+                            self.status = "Введите название папки".into();
+                            self.folder_editor = Some(folder);
+                        } else if self.vault.as_ref().unwrap().folders.iter().any(|existing| {
+                            existing.name.to_lowercase() == folder.name.to_lowercase()
+                                && self.folder_edit_original.as_deref() != Some(&existing.name)
+                        }) {
+                            self.status = "Папка с таким названием уже существует".into();
+                            self.folder_editor = Some(folder);
+                        } else {
+                            let vault = self.vault.as_mut().unwrap();
+                            if let Some(old) = self.folder_edit_original.take() {
+                                if let Some(existing) = vault
+                                    .folders
+                                    .iter_mut()
+                                    .find(|existing| existing.name == old)
+                                {
+                                    *existing = folder.clone();
+                                }
+                                for secret in &mut vault.secrets {
+                                    if secret.folder == old {
+                                        secret.folder = folder.name.clone();
+                                    }
+                                }
+                            } else {
+                                vault.folders.push(folder.clone());
+                            }
+                            self.selected_folder = Some(folder.name);
+                            self.status.clear();
+                            self.save_secrets();
+                        }
+                    }
+                    if !self.status.is_empty() {
+                        ui.colored_label(egui::Color32::RED, &self.status);
+                    }
+                }
+            });
+        }
+        if self.secret_editor.is_some() {
+            egui::Modal::new(egui::Id::new("secret_editor")).show(ctx, |ui| {
+                ui.set_min_width(420.);
+                ui.heading("Секрет");
+                if let Some(secret) = &mut self.secret_editor {
+                    ui.label("Название");
+                    ui.add(
+                        egui::TextEdit::singleline(&mut secret.name).desired_width(f32::INFINITY),
+                    );
+                    ui.label("Значение");
+                    ui.checkbox(&mut secret.hidden, "Скрывать значение на карточке");
+                    ui.add(
+                        egui::TextEdit::multiline(&mut secret.value)
+                            .password(secret.hidden)
+                            .desired_rows(5)
+                            .desired_width(f32::INFINITY),
+                    );
+                    egui::ComboBox::from_label("Папка")
+                        .selected_text(&secret.folder)
+                        .show_ui(ui, |ui| {
+                            for folder in &self.vault.as_ref().unwrap().folders {
+                                ui.selectable_value(
+                                    &mut secret.folder,
+                                    folder.name.clone(),
+                                    &folder.name,
+                                );
+                            }
+                        });
+                    secret_app_picker(
+                        ui,
+                        &mut secret.app,
+                        &self.settings.recent_apps,
+                        &mut self.app_icons,
+                    );
+                    if secret.app.is_empty() {
+                        if let Some(folder) =
+                            self.vault.as_ref().unwrap().folders.iter().find(|folder| {
+                                folder.name == secret.folder && !folder.app.is_empty()
+                            })
+                        {
+                            ui.small(format!("Используется приложение папки: {}", folder.app));
+                        }
+                    }
+                    ui.separator();
+                    let mut save = false;
+                    ui.horizontal(|ui| {
+                        save = ui
+                            .add(
+                                egui::Button::new("Сохранить секрет")
+                                    .fill(egui::Color32::from_rgb(38, 120, 155)),
+                            )
+                            .clicked();
+                        if ui.button("Отмена").clicked() {
+                            self.secret_editor = None;
+                        }
+                    });
+                    if save {
+                        let secret = self.secret_editor.take().unwrap();
+                        if secret.name.trim().is_empty() {
+                            self.status = "Введите название секрета".into();
+                            self.secret_editor = Some(secret);
+                        } else if !self
+                            .vault
+                            .as_ref()
+                            .unwrap()
+                            .folders
+                            .iter()
+                            .any(|folder| folder.name == secret.folder)
+                        {
+                            self.status = "Выберите папку для секрета".into();
+                            self.secret_editor = Some(secret);
+                        } else if self.vault.as_ref().unwrap().name_in_folder(
+                            &secret.name,
+                            &secret.folder,
+                            self.secret_selected,
+                        ) {
+                            self.status = "В этой папке уже есть секрет с таким названием".into();
+                            self.secret_editor = Some(secret);
+                        } else {
+                            let vault = self.vault.as_mut().unwrap();
+                            if let Some(i) = self.secret_selected.filter(|&i| i < vault.len()) {
+                                std::mem::replace(&mut vault[i], secret).clear();
+                            } else {
+                                vault.push(secret);
+                                self.secret_selected = Some(vault.len() - 1);
+                            }
+                            self.status.clear();
+                            self.save_secrets();
+                        }
+                    }
+                    if !self.status.is_empty() {
+                        ui.colored_label(egui::Color32::RED, &self.status);
+                    }
+                }
+            });
+        }
+    }
     fn new(cc: &eframe::CreationContext<'_>, initial_target: usize) -> Self {
         cc.egui_ctx.set_theme(egui::ThemePreference::Dark);
         let mut visuals = egui::Visuals::dark();
@@ -228,7 +983,10 @@ impl App {
             settings.monitor = false;
             settings.auto_paste = false;
             if clips.is_empty() {
-                clips.push(clipboard::text_clip("Добро пожаловать в RustClip!\nИстория, поиск, текстовые шаблоны и центральное превью.".into()));
+                clips.push(clipboard::text_clip(
+                    "Добро пожаловать в RustClip!\nИстория, поиск, секреты и центральное превью."
+                        .into(),
+                ));
             }
         }
         let (tx, commands) = mpsc::channel();
@@ -253,6 +1011,19 @@ impl App {
             rx,
             query: String::new(),
             snippets: false,
+            vault: None,
+            credential: String::new(),
+            credential_input: String::new(),
+            credential_confirm: String::new(),
+            pin_mode: secrets::mode().unwrap_or(true),
+            secret_editor: None,
+            secret_selected: None,
+            folder_editor: None,
+            folder_edit_original: None,
+            selected_folder: None,
+            secret_app_filter: String::new(),
+            filter_active_app: false,
+            pending_app: String::new(),
             stars: false,
             settings_open: false,
             confirm_discard: false,
@@ -410,7 +1181,7 @@ impl App {
                     ui.ctx().send_viewport_cmd(egui::ViewportCommand::Focus);
                 }
             ui.painter().rect_filled(ui.max_rect(), 0.0, egui::Color32::from_rgb(24, 24, 24));
-            ui.heading(["Общее","Горячие клавиши","История буфера обмена","Настройки вставки","Дополнительно","Фильтрация"][self.settings_page]);
+            ui.heading(["Общее","Горячие клавиши","История буфера обмена","Настройки вставки","Дополнительно","Фильтрация","Секреты"][self.settings_page]);
             if !self.status.is_empty() { ui.colored_label(egui::Color32::RED, &self.status); }
             ui.separator();
             let mut cancel = false;
@@ -422,7 +1193,7 @@ impl App {
             });
             egui::ScrollArea::vertical().show(ui, |ui| {
             ui.horizontal_top(|ui|{
-                ui.vertical(|ui|{ui.set_width(190.);for (i,name) in ["Общее","Горячие клавиши","История буфера обмена","Настройки вставки","Дополнительно","Фильтрация"].iter().enumerate(){ui.selectable_value(&mut self.settings_page,i,*name);}});
+                ui.vertical(|ui|{ui.set_width(190.);for (i,name) in ["Общее","Горячие клавиши","История буфера обмена","Настройки вставки","Дополнительно","Фильтрация","Секреты"].iter().enumerate(){ui.selectable_value(&mut self.settings_page,i,*name);}});
                 ui.separator();ui.vertical(|ui|{match self.settings_page {
                     0=>{ui.checkbox(&mut self.draft.monitor,"Следить за буфером обмена");ui.checkbox(&mut self.draft.hide_after,"Спрятаться после копирования/вставки");ui.label("Закрытие окна сворачивает RustClip в трей.");ui.label(format!("Данные: {}",model::directory().display()));},
                     1=>{
@@ -448,7 +1219,7 @@ impl App {
                     2=>{ui.label("Максимальное количество незакреплённых клипов");ui.add(egui::DragValue::new(&mut self.draft.limit).range(1..=usize::MAX));ui.label("Проверять последние клипы на дубликаты");ui.add(egui::DragValue::new(&mut self.draft.duplicates).range(0..=100));ui.checkbox(&mut self.draft.newest_first,"Новые клипы сверху");},
                     3=>{ui.checkbox(&mut self.draft.ctrl_v,"Эмулировать Ctrl+V (иначе Shift+Insert)");ui.checkbox(&mut self.draft.restore,"Восстанавливать Clipboard после вставки");ui.label("Задержка совместимости, мс");ui.add(egui::DragValue::new(&mut self.draft.paste_delay).range(20..=2000));},
                     4=>{ui.label("Таймер центрального превью, мс (0 — без таймера)");ui.add(egui::DragValue::new(&mut self.draft.preview_ms).range(0..=60000));ui.label("Максимальный текст, KiB");ui.add(egui::DragValue::new(&mut self.draft.max_text_kb).range(1..=32768));ui.label("Esc скрывает центральное превью.");},
-                    _=>{
+                    5=>{
                         ui.label("Имя приложения (с .exe или без) или полный путь.");
                         app_list(ui, "Не захватывать из приложений:", &mut self.draft.excluded_capture, &mut self.adding_capture, &self.settings.recent_apps, &mut self.app_icons);
                         ui.separator();
@@ -458,6 +1229,7 @@ impl App {
                         ui.text_edit_multiline(&mut self.draft.excluded_formats);
                         ui.label("Базовый список проблемных форматов встроен; читаются только поддерживаемые форматы.");
                     }
+                    _=>self.setup_secrets_ui(ui),
                 }});
             });
             });
@@ -516,10 +1288,38 @@ impl eframe::App for App {
                     self.settings.recent_apps.truncate(5);
                     self.draft.recent_apps = self.settings.recent_apps.clone();
                 }
-                Event::Open => {
+                Event::Open(app) => {
+                    self.pending_app = app.clone();
+                    self.query.clear();
+                    self.secret_app_filter.clear();
+                    self.filter_active_app = false;
+                    if self.vault.is_none() && !self.credential.is_empty() {
+                        match secrets::unlock(&self.credential) {
+                            Ok(vault) => self.vault = Some(vault),
+                            Err(e) => {
+                                self.lock_secrets();
+                                self.status = e;
+                            }
+                        }
+                    }
+                    self.snippets = self
+                        .vault
+                        .as_ref()
+                        .is_some_and(|vault| has_secret_for_app(vault, &app));
+                    if self.snippets {
+                        self.selected_folder = None;
+                        self.secret_app_filter = app.rsplit('\\').next().unwrap_or(&app).into();
+                        self.filter_active_app = true;
+                    } else {
+                        self.clear_secret_view();
+                    }
                     ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
                     ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
-                    self.focus_settings = if self.settings_open && self.settings_last_active { 2 } else { 0 };
+                    self.focus_settings = if self.settings_open && self.settings_last_active {
+                        2
+                    } else {
+                        0
+                    };
                     self.send(Command::HidePreview);
                 }
                 Event::Previous(destination) => self.cycle(&ctx, true, Some(destination)),
@@ -553,6 +1353,7 @@ impl eframe::App for App {
     }
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
         let _ = model::write_json(&model::directory().join("settings.json"), &self.settings);
+        self.lock_secrets();
         self.send(Command::Quit);
     }
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
@@ -613,15 +1414,6 @@ impl eframe::App for App {
                     }
                     ui.close();
                 }
-                if ui.button("Создать шаблон").clicked() {
-                    if let Some(i) = self.selected {
-                        let mut c = self.clips[i].clone();
-                        c.id = model::now();
-                        c.snippet = true;
-                        self.add(c);
-                    }
-                    ui.close();
-                }
                 if ui.button("Сохранить в файл…").clicked() {
                     if let Some(i) = self.selected {
                         self.status = match model::export_clip(&self.clips[i]) {
@@ -661,6 +1453,33 @@ impl eframe::App for App {
         ui.separator();
         ui.horizontal(|ui| {
             if ui
+                .selectable_value(&mut self.snippets, false, "История буфера обмена")
+                .clicked()
+            {
+                self.clear_secret_view();
+            }
+            if ui
+                .selectable_value(&mut self.snippets, true, "Секреты")
+                .clicked()
+            {
+                self.filter_active_app = false;
+                self.secret_app_filter.clear();
+                self.select_first_folder();
+            }
+        });
+        if self.snippets {
+            self.secrets_ui(ui, &ctx);
+            if !self.status.is_empty() {
+                ui.colored_label(egui::Color32::RED, &self.status);
+                if ui.small_button("Скрыть сообщение").clicked() {
+                    self.status.clear();
+                }
+            }
+            self.preferences(&ctx);
+            return;
+        }
+        ui.horizontal(|ui| {
+            if ui
                 .add(egui::Button::new("Вставить").fill(egui::Color32::from_rgb(38, 120, 155)))
                 .clicked()
             {
@@ -683,13 +1502,6 @@ impl eframe::App for App {
                     self.remove(i);
                 }
             }
-            if ui.button("+ Шаблон").clicked() {
-                self.editor = Some((None, String::new()));
-            }
-        });
-        ui.horizontal(|ui| {
-            ui.selectable_value(&mut self.snippets, false, "История буфера обмена");
-            ui.selectable_value(&mut self.snippets, true, "Шаблоны");
         });
         ui.horizontal(|ui| {
             ui.label("Поиск:");

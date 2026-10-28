@@ -18,6 +18,7 @@ use windows_sys::Win32::{
 pub enum Command {
     Copy(Clip, bool, Option<usize>),
     Paste(Clip, bool, Option<usize>, Option<usize>),
+    Secret(Clip, bool),
     Settings(Settings),
     HidePreview,
     Quit,
@@ -25,7 +26,7 @@ pub enum Command {
 pub enum Event {
     Captured(Clip),
     ActiveApp(String),
-    Open,
+    Open(String),
     Previous(usize),
     Next(usize),
     PlainPaste(usize),
@@ -151,6 +152,9 @@ fn excluded(path: &str, list: &str) -> bool {
                         ext.eq_ignore_ascii_case("exe") && stem.eq_ignore_ascii_case(s)
                     }))
         })
+}
+pub fn app_matches(path: &str, app: &str) -> bool {
+    !app.is_empty() && excluded(path, app)
 }
 fn format_name(id: u32) -> String {
     if id < 0xc000 {
@@ -522,7 +526,8 @@ pub fn start(
             register_hotkeys(hwnd, &settings, &mut registered, &tx);
         }
         let mut target = initial_target as HWND;
-        let mut pending: Option<(Clip, bool, Option<Clip>, HWND)> = None;
+        let mut pending: Option<(Clip, bool, Option<Clip>, HWND, bool)> = None;
+        let mut secret_sequences = Vec::new();
         let mut restore: Option<(Clip, u32, Instant)> = None;
         let mut preview = Preview::new();
         let mut dirty = false;
@@ -569,7 +574,7 @@ pub fn start(
                         active
                     };
                     let event = match msg.wParam {
-                        1 => Event::Open,
+                        1 => Event::Open(executable(destination)),
                         2 => Event::Previous(destination as usize),
                         3 => Event::Next(destination as usize),
                         _ => Event::PlainPaste(destination as usize),
@@ -595,7 +600,7 @@ pub fn start(
                 if msg.message == WM_APP + 2 {
                     let action = msg.lParam as u32 & 0xffff;
                     if action == WM_LBUTTONUP || action == NIN_SELECT {
-                        let _ = tx.send(Event::Open);
+                        let _ = tx.send(Event::Open(String::new()));
                         ctx.request_repaint();
                     }
                     if action == WM_RBUTTONUP || action == WM_CONTEXTMENU {
@@ -621,7 +626,7 @@ pub fn start(
                         PostMessageW(hwnd, WM_NULL, 0, 0);
                         match choice {
                             1 => {
-                                let _ = tx.send(Event::Open);
+                                let _ = tx.send(Event::Open(String::new()));
                             }
                             2 => {
                                 let _ = tx.send(Event::Quit);
@@ -659,6 +664,19 @@ pub fn start(
                         }
                         preview.show(&clip, target, settings.preview_ms, number);
                     }
+                    Command::Secret(clip, should_paste) => {
+                        if should_paste {
+                            let old = capture(hwnd, &settings, true).ok().flatten();
+                            pending = Some((clip, true, old, target, true));
+                        } else {
+                            match publish(hwnd, &clip, true) {
+                                Ok(seq) => secret_sequences.push(seq),
+                                Err(e) => {
+                                    let _ = tx.send(Event::Error(e));
+                                }
+                            }
+                        }
+                    }
                     Command::Paste(clip, plain, destination, number) => {
                         let paste_target = destination.map_or(target, |handle| handle as HWND);
                         let old = if settings.restore {
@@ -667,7 +685,7 @@ pub fn start(
                             None
                         };
                         preview.show(&clip, paste_target, settings.preview_ms, number);
-                        pending = Some((clip, plain, old, paste_target));
+                        pending = Some((clip, plain, old, paste_target, false));
                     }
                 }
             }
@@ -685,10 +703,13 @@ pub fn start(
                 }
             }
             if released() {
-                if let Some((clip, plain, old, paste_target)) = pending.take() {
+                if let Some((clip, plain, old, paste_target, secret)) = pending.take() {
                     preview.hide();
                     match publish(hwnd, &clip, plain) {
                         Ok(seq) => {
+                            if secret {
+                                secret_sequences.push(seq);
+                            }
                             thread::sleep(Duration::from_millis(settings.paste_delay.min(2000)));
                             match paste(paste_target, settings.ctrl_v) {
                                 Ok(()) => {}
@@ -711,14 +732,18 @@ pub fn start(
             }) {
                 if let Some((old, seq, _)) = restore.take() {
                     if GetClipboardSequenceNumber() == seq {
-                        let _ = publish(hwnd, &old, false);
+                        if let Ok(seq) = publish(hwnd, &old, false) {
+                            secret_sequences.push(seq);
+                        }
                     }
                 }
             }
             if dirty {
                 dirty = false;
                 let seq = GetClipboardSequenceNumber();
-                if seq != last_sequence && settings.monitor {
+                if secret_sequences.contains(&seq) {
+                    secret_sequences.retain(|known| *known != seq);
+                } else if seq != last_sequence && settings.monitor {
                     match capture(hwnd, &settings, false) {
                         Ok(Some(clip)) => {
                             let _ = tx.send(Event::Captured(clip));
