@@ -42,6 +42,24 @@ msiexec /x RustClip-0.1.0-x64.msi /qn
 msiexec /x RustClip-0.1.0-x64.msi /qn DELETEUSERDATA=1
 ```
 
+### Сборка и установка без MSI
+
+Из корня проекта выполните:
+
+```powershell
+.\scripts\install-local.ps1
+```
+
+Скрипт собирает release-версию, копирует EXE, значок, лицензию и README в `%LOCALAPPDATA%\Programs\RustClip` и создаёт ярлык в меню «Пуск» текущего пользователя. MSI, WiX, .NET SDK и права администратора не нужны. Программа автоматически не запускается; история, настройки и секреты в `%APPDATA%\RustClip` сохраняются. Для обновления завершите установленный RustClip через трей и повторите команду.
+
+Для сборки должны быть установлены Rust с инструментарием `stable-x86_64-pc-windows-msvc` и Visual Studio C++ Build Tools с Windows SDK. При первой сборке Cargo скачивает зависимости. Если инструменты и зависимости уже есть локально, можно запретить сетевые обращения Cargo:
+
+```powershell
+.\scripts\install-local.ps1 -Offline
+```
+
+Другой каталог установки задаётся через `-InstallDir 'D:\Apps\RustClip'`. Скрипт не добавляет запись в список установленных приложений Windows. Для удаления завершите RustClip, удалите его каталог установки и ярлык `%APPDATA%\Microsoft\Windows\Start Menu\Programs\RustClip.lnk`; данные в `%APPDATA%\RustClip` можно сохранить или удалить отдельно.
+
 ### Локальная сборка MSI
 
 Нужны Rust MSVC, Visual Studio C++ Build Tools с Windows SDK и .NET SDK 8. Команды из корня проекта:
