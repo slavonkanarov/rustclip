@@ -33,17 +33,13 @@ impl eframe::App for App {
                 }
                 Event::Open(app) => {
                     self.scroll_to_newest = true;
-                    self.pending_app = app.clone();
+                    self.pending_app = app;
                     self.query.clear();
                     self.secret_app_filter.clear();
                     self.filter_active_app = false;
-                    if self.vault.is_none() && secrets::exists() && !app.is_empty() {
-                        self.ask_unlock(true);
-                    } else {
-                        self.unlock_open = false;
-                        self.unlock_input.zeroize();
-                        self.route_app();
-                    }
+                    self.unlock_open = false;
+                    self.unlock_input.zeroize();
+                    self.route_app();
                     ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
                     ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
                     self.focus_settings = if self.settings_open && self.settings_last_active {
@@ -97,7 +93,9 @@ impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         if super::widgets::back_requested(&ctx) {
-            if let Some(mut secret) = self.secret_editor.take() {
+            if self.unlock_open {
+                self.cancel_unlock();
+            } else if let Some(mut secret) = self.secret_editor.take() {
                 secret.clear();
             } else if self.folder_editor.take().is_some() {
                 self.folder_edit_original = None;
@@ -237,13 +235,12 @@ impl eframe::App for App {
                     self.filter_active_app = false;
                     self.secret_app_filter.clear();
                     if self.vault.is_none() && secrets::exists() {
-                        self.ask_unlock(false);
+                        self.ask_unlock();
                     } else {
                         self.select_first_folder();
                     }
                 }
             });
-            self.unlock_dialog(&ctx);
             if self.snippets {
                 self.secrets_ui(ui, &ctx);
                 if !self.status.is_empty() {
@@ -326,6 +323,7 @@ impl eframe::App for App {
                         .margin(10.),
                 );
                 if !self.settings_open
+                    && !self.unlock_open
                     && self.editor.is_none()
                     && ctx.input(|i| i.modifiers.ctrl && i.key_pressed(egui::Key::F))
                 {
@@ -367,6 +365,7 @@ impl eframe::App for App {
                 self.selected = indices.first().copied();
             }
             let navigating = !self.settings_open
+                && !self.unlock_open
                 && self.editor.is_none()
                 && !ctx.egui_wants_keyboard_input()
                 && ctx.input(|i| {
@@ -583,6 +582,7 @@ impl eframe::App for App {
                 }
             }
             if !self.settings_open
+                && !self.unlock_open
                 && self.editor.is_none()
                 && !egui::Popup::is_any_open(&ctx)
                 && !ctx.egui_wants_keyboard_input()
@@ -649,5 +649,6 @@ impl eframe::App for App {
                 self.editor = None;
             }
         });
+        self.unlock_dialog(&ctx);
     }
 }

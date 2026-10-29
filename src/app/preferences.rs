@@ -6,6 +6,9 @@ use crate::{clipboard::Command, hotkeys, model};
 use eframe::egui;
 use zeroize::Zeroize;
 
+#[cfg(test)]
+mod tests;
+
 const SETTINGS_PAGES: [&str; 7] = [
     "Общее",
     "Горячие клавиши",
@@ -24,6 +27,33 @@ const SETTINGS_HINTS: [&str; 7] = [
     "Выберите приложения и форматы, которые нужно пропускать.",
     "Защита и доступ к зашифрованному хранилищу.",
 ];
+
+fn settings_navigation(ui: &mut egui::Ui, page: &mut usize, focus: bool) {
+    let mut enter_content = None;
+    for (i, name) in SETTINGS_PAGES.iter().enumerate() {
+        let response = ui.add_sized(
+            [ui.available_width(), 38.],
+            egui::Button::new(*name).selected(*page == i),
+        );
+        if focus && *page == i {
+            response.request_focus();
+        }
+        if response.clicked() || response.has_focus() {
+            *page = i;
+        }
+        if response.has_focus()
+            && ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowRight))
+        {
+            enter_content = Some(response.id);
+        }
+    }
+    if let Some(id) = enter_content {
+        ui.memory_mut(|memory| {
+            memory.surrender_focus(id);
+            memory.move_focus(egui::FocusDirection::Next);
+        });
+    }
+}
 
 impl App {
     pub(super) fn open_preferences(&mut self) {
@@ -58,6 +88,7 @@ impl App {
                 .with_inner_size([920., 660.])
                 .with_min_inner_size([760., 500.]),
             |ui, _| {
+                ui.visuals_mut().widgets.active.bg_stroke = egui::Stroke::new(2., ACCENT);
                 if super::widgets::back_requested(ui.ctx())
                     && self.hotkey_recorder.take().is_none()
                 {
@@ -90,11 +121,8 @@ impl App {
                     ui.heading("Настройки");
                     ui.colored_label(MUTED, "RustClip");
                     ui.add_space(22.);
-                    for (i, name) in SETTINGS_PAGES.iter().enumerate() {
-                        if ui.add_sized([ui.available_width(), 38.], egui::Button::new(*name).selected(self.settings_page == i)).clicked() {
-                            self.settings_page = i;
-                        }
-                    }
+                    settings_navigation(ui, &mut self.settings_page,
+                        focus_settings && self.hotkey_recorder.is_none() && !self.confirm_discard);
                 });
             egui::CentralPanel::default().frame(egui::Frame::NONE.inner_margin(26)).show(ui, |ui| {
                 ui.heading(SETTINGS_PAGES[self.settings_page]);
@@ -133,9 +161,9 @@ impl App {
                         }
                         ui.checkbox(&mut self.draft.auto_paste,"Автоматически вставлять после Quick Copy");
                     },
-                    2=>{ui.label("Максимальное количество незакреплённых клипов");ui.add(egui::DragValue::new(&mut self.draft.limit).range(1..=usize::MAX));ui.label("Проверять последние клипы на дубликаты");ui.add(egui::DragValue::new(&mut self.draft.duplicates).range(0..=100));ui.checkbox(&mut self.draft.newest_first,"Новые клипы сверху");},
-                    3=>{ui.checkbox(&mut self.draft.ctrl_v,"Эмулировать Ctrl+V (иначе Shift+Insert)");ui.checkbox(&mut self.draft.restore,"Восстанавливать Clipboard после вставки");ui.label("Задержка совместимости, мс");ui.add(egui::DragValue::new(&mut self.draft.paste_delay).range(20..=2000));},
-                    4=>{ui.label("Таймер центрального превью, мс (0 — без таймера)");ui.add(egui::DragValue::new(&mut self.draft.preview_ms).range(0..=60000));ui.label("Максимальный текст, KiB");ui.add(egui::DragValue::new(&mut self.draft.max_text_kb).range(1..=32768));ui.label("Esc скрывает центральное превью.");},
+                    2=>{ui.label("Максимальное количество незакреплённых клипов");ui.add(egui::DragValue::new(&mut self.draft.limit).speed(1.).range(1..=usize::MAX));ui.label("Проверять последние клипы на дубликаты");ui.add(egui::DragValue::new(&mut self.draft.duplicates).speed(1.).range(0..=100));ui.checkbox(&mut self.draft.newest_first,"Новые клипы сверху");},
+                    3=>{ui.checkbox(&mut self.draft.ctrl_v,"Эмулировать Ctrl+V (иначе Shift+Insert)");ui.checkbox(&mut self.draft.restore,"Восстанавливать Clipboard после вставки");ui.label("Задержка совместимости, мс");ui.add(egui::DragValue::new(&mut self.draft.paste_delay).speed(1.).range(20..=2000));},
+                    4=>{ui.label("Таймер центрального превью, мс (0 — без таймера)");ui.add(egui::DragValue::new(&mut self.draft.preview_ms).speed(1.).range(0..=60000));ui.label("Максимальный текст, KiB");ui.add(egui::DragValue::new(&mut self.draft.max_text_kb).speed(1.).range(1..=32768));ui.label("Esc скрывает центральное превью.");},
                     5=>{
                         ui.label("Имя приложения (с .exe или без) или полный путь.");
                         app_list(ui, "Не захватывать из приложений:", &mut self.draft.excluded_capture, &mut self.adding_capture, &self.settings.recent_apps, &mut self.app_icons);
