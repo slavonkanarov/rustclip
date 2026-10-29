@@ -2,6 +2,7 @@
 # will have compiled files and executables
 debug
 target
+/.wix/
 
 # Local screenshots and UI review artifacts
 /audit-*.png

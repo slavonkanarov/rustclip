@@ -1,0 +1,71 @@
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui"
+     xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
+  <Package Name="RustClip" Manufacturer="RustClip"
+           Version="$(var.ProductVersion)"
+           UpgradeCode="C46BEBD7-5641-4709-A6E8-20433C31DA2C"
+           Scope="perMachine">
+    <MajorUpgrade AllowSameVersionUpgrades="yes" Schedule="afterInstallInitialize"
+                  DowngradeErrorMessage="A newer version of RustClip is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+    <ui:WixUI Id="WixUI_Minimal" />
+    <UIRef Id="WixUI_ErrorProgressText" />
+    <WixVariable Id="WixUILicenseRtf" Value="$(var.LicenseRtf)" />
+    <Property Id="WIXUI_EXITDIALOGOPTIONALTEXT"
+              Value="RustClip is installed. Open it from the Start menu." />
+    <Icon Id="RustClip.ico" SourceFile="$(var.RepoDir)\assets\icon.ico" />
+    <Property Id="ARPPRODUCTICON" Value="RustClip.ico" />
+    <Property Id="DELETEUSERDATA" Secure="yes" />
+    <SetProperty Id="RustClipDataFolder" Value="[%APPDATA]\RustClip"
+                 Before="Wix4RemoveFoldersEx_X64" Sequence="execute"
+                 Condition="DELETEUSERDATA = 1 AND REMOVE ~= &quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE" />
+    <UI>
+      <Dialog Id="RemoveDataDlg" Width="370" Height="270" Title="Remove RustClip">
+        <Control Id="Title" Type="Text" X="20" Y="15" Width="330" Height="25"
+                 Transparent="yes" NoPrefix="yes" Text="{\WixUI_Font_Title}Remove RustClip" />
+        <Control Id="Description" Type="Text" X="20" Y="55" Width="330" Height="40"
+                 Text="Your data will be kept unless you select the option below." />
+        <Control Id="DeleteData" Type="CheckBox" X="20" Y="100" Width="330" Height="35"
+                 Property="DELETEUSERDATA" CheckBoxValue="1"
+                 Text="Also delete this user's RustClip data" />
+        <Control Id="Warning" Type="Text" X="20" Y="145" Width="330" Height="65"
+                 Text="This permanently deletes clipboard history, settings, encrypted secrets, backups and exports in %APPDATA%\RustClip. Other users' data and custom data directories are kept." />
+        <Control Id="Remove" Type="PushButton" X="212" Y="243" Width="70" Height="17"
+                 Default="yes" Text="Remove">
+          <Publish Event="EndDialog" Value="Return" />
+        </Control>
+        <Control Id="Cancel" Type="PushButton" X="287" Y="243" Width="56" Height="17"
+                 Cancel="yes" Text="Cancel">
+          <Publish Event="EndDialog" Value="Exit" />
+        </Control>
+      </Dialog>
+    </UI>
+    <InstallUISequence>
+      <Show Dialog="RemoveDataDlg" Before="ExecuteAction"
+            Condition="Installed AND REMOVE ~= &quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE" />
+    </InstallUISequence>
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="RustClip">
+        <Component Id="Executable" Guid="18D3CD4F-814C-4D73-9DBE-F8EFD854919F">
+          <File Id="RustClipExe" Source="$(var.BuildDir)\rustclip.exe" KeyPath="yes">
+            <Shortcut Id="StartMenuShortcut" Directory="ProgramMenuFolder" Advertise="yes"
+                      Name="RustClip" Description="Clipboard history and encrypted secrets"
+                      Icon="RustClip.ico" WorkingDirectory="INSTALLFOLDER" />
+          </File>
+          <RemoveFolder Id="RemoveInstallFolder" Directory="INSTALLFOLDER" On="uninstall" />
+          <util:RemoveFolderEx Id="RemoveUserData" Property="RustClipDataFolder" On="uninstall"
+                               Condition="DELETEUSERDATA = 1 AND REMOVE ~= &quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE" />
+        </Component>
+        <Component Id="LicenseFile" Guid="612D183A-AD87-47AF-8C13-9F8BD9C92816">
+          <File Id="License" Source="$(var.RepoDir)\LICENSE" Name="LICENSE.txt" KeyPath="yes" />
+        </Component>
+      </Directory>
+    </StandardDirectory>
+    <StandardDirectory Id="ProgramMenuFolder" />
+    <Feature Id="MainFeature" Title="RustClip" Level="1">
+      <ComponentRef Id="Executable" />
+      <ComponentRef Id="LicenseFile" />
+    </Feature>
+  </Package>
+</Wix>

@@ -18,6 +18,45 @@ RustClip показывает ошибку регистрации конфлик
 
 Настройки (`F4`) и редактор клипа (`F2`) открываются отдельными окнами.
 
+## Установка и сборки GitHub
+
+[Windows MSI workflow](.github/workflows/windows-msi.yml) запускается при push, pull request и вручную через **Actions → Windows MSI → Run workflow**. Он проверяет форматирование и тесты, собирает Windows x64 EXE и MSI, проверяет установку, обновление и удаление. Сборки используют MSVC со статической библиотекой CRT.
+
+После успешной сборки в Actions доступен артефакт `rustclip-windows-x64` (90 дней хранения):
+
+- `RustClip-<версия>-x64.msi` — мастер установки с лицензией, установкой в `C:\Program Files\RustClip` и ярлыком в меню «Пуск»; требуются права администратора.
+- `RustClip-<версия>-windows-x64.zip` — EXE, лицензия и README для запуска без установки.
+- `rustclip.exe`, `LICENSE` и `SHA256SUMS.txt` — отдельный исполняемый файл, лицензия и контрольные суммы.
+
+Сборки ветки `main` также автоматически публикуются как отдельные предварительные выпуски в [Releases](https://github.com/slavonkanarov/rustclip/releases). Файлы там остаются доступными после истечения срока хранения артефакта Actions. Публикация начнёт работать после отправки workflow в GitHub; дополнительные секреты не нужны — используется `GITHUB_TOKEN`.
+
+Установка не запускает RustClip автоматически и не включает автозапуск. Перед обновлением завершите приложение через значок трея. MSI обновляет существующую установку, в том числе сборку с той же версией; более старую версию поверх новой установить нельзя.
+
+При обычном удалении MSI показывает выбор: **сохранить данные** (по умолчанию) или **Also delete this user's RustClip data**. Второй вариант безвозвратно удаляет историю, настройки, зашифрованные секреты, резервные копии и экспорты из `%APPDATA%\RustClip` текущего пользователя. Данные других пользователей и каталоги, заданные через `RUSTCLIP_DATA_DIR`, не удаляются. При обновлении данные сохраняются. ZIP/EXE также используют `%APPDATA%\RustClip`, а не папку с программой.
+
+При тихом удалении данные сохраняются; для явного удаления данных передайте `DELETEUSERDATA=1`:
+
+```powershell
+msiexec /x RustClip-0.1.0-x64.msi /qn
+# Удалить также данные текущего пользователя:
+msiexec /x RustClip-0.1.0-x64.msi /qn DELETEUSERDATA=1
+```
+
+### Локальная сборка MSI
+
+Нужны Rust MSVC, Visual Studio C++ Build Tools с Windows SDK и .NET SDK 8. Команды из корня проекта:
+
+```powershell
+rustup toolchain install stable-x86_64-pc-windows-msvc --profile minimal
+cargo +stable-x86_64-pc-windows-msvc build --release --locked --target x86_64-pc-windows-msvc
+dotnet tool install wix --version 6.0.2 --tool-path ./target/tools/wix --add-source https://api.nuget.org/v3/index.json
+./target/tools/wix/wix.exe extension add -g WixToolset.UI.wixext/6.0.2
+./target/tools/wix/wix.exe extension add -g WixToolset.Util.wixext/6.0.2
+./scripts/package-windows.ps1 -Wix ./target/tools/wix/wix.exe
+```
+
+Результат находится в `target/package`. Версия берётся из `Cargo.toml`; формат для MSI — `major.minor.patch` (до `255.255.65535`). Установщик пока не подписан цифровой подписью.
+
 Глобальные комбинации изменяются в `Настройки → Горячие клавиши`: введите, например, `Ctrl+Shift+Up` и нажмите `OK`. Поддерживаются Ctrl, Shift, Alt, Win, буквы, цифры, стрелки, F1–F24 и основные служебные клавиши. Повторяющиеся и некорректные комбинации не сохраняются; если сочетание занято другой программой, RustClip сообщает об этом.
 
 | Комбинация | Действие |

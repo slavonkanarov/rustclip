@@ -1,0 +1,100 @@
+name: Windows MSI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-2025
+    timeout-minutes: 40
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Check out sources
+        uses: actions/checkout@v7
+
+      - name: Set up Rust
+        run: |
+          rustup toolchain install stable-x86_64-pc-windows-msvc --profile minimal --component rustfmt
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          rustup default stable-x86_64-pc-windows-msvc
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Run Rust tests
+        run: cargo test --locked --target x86_64-pc-windows-msvc
+
+      - name: Build Windows executable
+        run: cargo build --locked --release --target x86_64-pc-windows-msvc
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Install WiX Toolset
+        run: |
+          dotnet tool install wix --version 6.0.2 --tool-path "$env:RUNNER_TEMP/wix" --add-source https://api.nuget.org/v3/index.json
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & "$env:RUNNER_TEMP/wix/wix.exe" extension add -g WixToolset.UI.wixext/6.0.2
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & "$env:RUNNER_TEMP/wix/wix.exe" extension add -g WixToolset.Util.wixext/6.0.2
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Build installer and portable archive
+        run: ./scripts/package-windows.ps1 -Wix "$env:RUNNER_TEMP/wix/wix.exe"
+
+      - name: Verify MSI installation, upgrade and removal
+        run: ./scripts/test-installer.ps1 -Wix "$env:RUNNER_TEMP/wix/wix.exe"
+
+      - name: Upload Windows packages
+        uses: actions/upload-artifact@v7
+        with:
+          name: rustclip-windows-x64
+          path: |
+            target/package/*.msi
+            target/package/*.zip
+            target/package/rustclip.exe
+            target/package/LICENSE
+            target/package/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Upload installer test logs
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: installer-test-logs
+          path: target/installer-test/*.log
+          if-no-files-found: ignore
+
+  release:
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download Windows packages
+        uses: actions/download-artifact@v8
+        with:
+          name: rustclip-windows-x64
+          path: package
+
+      - name: Publish main build to Releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh release create "main-${GITHUB_RUN_NUMBER}-${GITHUB_RUN_ATTEMPT}" package/* \
+            --target "$GITHUB_SHA" \
+            --title "RustClip main build #${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT}" \
+            --notes "Automated Windows x64 build from main at $GITHUB_SHA. Download the MSI to install, or the ZIP to run without installation." \
+            --prerelease --latest=false
