@@ -566,6 +566,7 @@ pub fn start(
                     dirty = true;
                 }
                 if msg.message == WM_HOTKEY
+                    && !hotkeys::is_recording()
                     && !excluded(
                         &executable(GetForegroundWindow()),
                         &settings.excluded_hotkeys,
@@ -644,6 +645,9 @@ pub fn start(
                 }
                 TranslateMessage(&msg);
                 DispatchMessageW(&msg);
+            }
+            if hotkeys::is_recording() {
+                repeat = None;
             }
             while let Ok(command) = rx.try_recv() {
                 match command {

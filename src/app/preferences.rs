@@ -35,6 +35,7 @@ impl App {
     }
     pub(super) fn preferences(&mut self, ctx: &egui::Context) {
         if !self.settings_open {
+            self.hotkey_recorder = None;
             self.focus_settings = 0;
             self.credential_input.zeroize();
             self.credential_confirm.zeroize();
@@ -88,19 +89,25 @@ impl App {
                     0=>{ui.checkbox(&mut self.draft.monitor,"Следить за буфером обмена");ui.checkbox(&mut self.draft.hide_after,"Спрятаться после копирования/вставки");ui.label("Закрытие окна сворачивает RustClip в трей.");ui.label(format!("Данные: {}",model::directory().display()));},
                     1=>{
                         ui.label("Глобальные сочетания (Ctrl, Shift, Alt, Win + клавиша):");
-                        egui::Grid::new("hotkey_grid").num_columns(2).show(ui, |ui| {
-                            for (name, value) in [
+                        egui::Grid::new("hotkey_grid").num_columns(3).show(ui, |ui| {
+                            for (index, (name, value)) in [
                                 ("Открыть историю", &mut self.draft.hotkey_open),
                                 ("Предыдущий клип", &mut self.draft.hotkey_previous),
                                 ("Следующий клип", &mut self.draft.hotkey_next),
                                 ("Вставить как текст", &mut self.draft.hotkey_plain_paste),
-                            ] {
+                            ].into_iter().enumerate() {
                                 ui.label(name);
-                                ui.text_edit_singleline(value);
+                                ui.label(value.as_str());
+                                if ui.button("…").on_hover_text("Записать сочетание клавиш").clicked() {
+                                    match hotkeys::Recorder::new(ui.ctx()) {
+                                        Ok(recorder) => self.hotkey_recorder = Some((index, recorder)),
+                                        Err(error) => self.status = error,
+                                    }
+                                }
                                 ui.end_row();
                             }
                         });
-                        ui.label("Пример: Ctrl+Shift+Up. Изменения применяются после сохранения.");
+                        ui.label("Нажмите «…», чтобы записать сочетание. Изменения применяются после сохранения настроек.");
                         if let Err(error) = hotkeys::validate(&self.draft) {
                             ui.colored_label(egui::Color32::RED, error);
                         }
@@ -127,16 +134,17 @@ impl App {
                 self.close_preferences();
             } else if ui.input(|i| i.viewport().close_requested()) {
                 ui.ctx().send_viewport_cmd(egui::ViewportCommand::CancelClose);
-                if !self.confirm_discard {
+                if self.hotkey_recorder.take().is_none() && !self.confirm_discard {
                     self.close_preferences();
                 }
-            } else if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+            } else if self.hotkey_recorder.is_none() && ui.input(|i| i.key_pressed(egui::Key::Escape)) {
                 if self.confirm_discard {
                     self.confirm_discard = false;
                 } else {
                     self.close_preferences();
                 }
             }
+            self.record_hotkey(ui.ctx());
             if self.confirm_discard {
                 egui::Modal::new(egui::Id::new("discard_settings")).show(ui.ctx(), |ui| {
                     ui.heading("Закрыть настройки?");
@@ -155,5 +163,69 @@ impl App {
             }
             },
         );
+        if !self.settings_open {
+            self.hotkey_recorder = None;
+        }
+    }
+
+    fn record_hotkey(&mut self, ctx: &egui::Context) {
+        let Some((index, recorder)) = &mut self.hotkey_recorder else {
+            return;
+        };
+        let value = recorder.value().to_owned();
+        let mut draft = self.draft.clone();
+        *[
+            &mut draft.hotkey_open,
+            &mut draft.hotkey_previous,
+            &mut draft.hotkey_next,
+            &mut draft.hotkey_plain_paste,
+        ][*index] = value.clone();
+        let validation = hotkeys::validate(&draft);
+        let mut close = false;
+        egui::Modal::new(egui::Id::new("record_hotkey")).show(ctx, |ui| {
+            ui.set_min_width(380.);
+            ui.heading("Запись горячей клавиши");
+            ui.label("Нажмите сочетание с Ctrl, Shift, Alt или Win.");
+            ui.add_space(12.);
+            ui.horizontal_wrapped(|ui| {
+                if value.is_empty() {
+                    ui.label("Ожидание нажатия…");
+                } else {
+                    for (index, key) in value.split('+').enumerate() {
+                        if index > 0 {
+                            ui.label("+");
+                        }
+                        ui.add(
+                            egui::Button::new(egui::RichText::new(key).size(22.))
+                                .sense(egui::Sense::hover()),
+                        );
+                    }
+                }
+            });
+            if !value.is_empty()
+                && let Err(error) = &validation
+            {
+                ui.colored_label(egui::Color32::LIGHT_RED, error);
+            }
+            ui.add_space(12.);
+            ui.horizontal(|ui| {
+                if ui.button("Отмена").clicked() {
+                    close = true;
+                }
+                if ui
+                    .add_enabled(
+                        validation.is_ok(),
+                        egui::Button::new("Сохранить").fill(ACCENT),
+                    )
+                    .clicked()
+                {
+                    self.draft = draft;
+                    close = true;
+                }
+            });
+        });
+        if close {
+            self.hotkey_recorder = None;
+        }
     }
 }

@@ -1,6 +1,9 @@
 use crate::model::Settings;
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::*;
 
+mod recorder;
+pub use recorder::{Recorder, is_recording};
+
 pub struct Hotkey {
     pub modifiers: u32,
     pub key: u32,
@@ -26,6 +29,7 @@ pub fn parse(value: &str) -> Result<Hotkey, String> {
                     "LEFT" | "←" => VK_LEFT as u32,
                     "RIGHT" | "→" => VK_RIGHT as u32,
                     "SPACE" => VK_SPACE as u32,
+                    "BACKSPACE" => VK_BACK as u32,
                     "TAB" => VK_TAB as u32,
                     "ESC" | "ESCAPE" => VK_ESCAPE as u32,
                     "ENTER" | "RETURN" => VK_RETURN as u32,
