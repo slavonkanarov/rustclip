@@ -131,7 +131,8 @@ impl App {
                 .with_inner_size([360., 170.])
                 .with_resizable(false),
             |ui, _| {
-                if ui.input(|i| i.viewport().close_requested() || i.key_pressed(egui::Key::Escape))
+                if ui.input(|i| i.viewport().close_requested())
+                    || super::widgets::back_requested(ui.ctx())
                 {
                     cancel = true;
                     return;
@@ -422,7 +423,17 @@ impl App {
                 },
             );
             ui.horizontal_wrapped(|ui| {
-                ui.add(egui::TextEdit::singleline(&mut self.query).hint_text("Поиск по названию"));
+                let search = ui.add(
+                    egui::TextEdit::singleline(&mut self.query)
+                        .hint_text("Поиск по названию · Ctrl+F"),
+                );
+                if self.secret_editor.is_none()
+                    && self.folder_editor.is_none()
+                    && !egui::Popup::is_any_open(ctx)
+                    && ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::F))
+                {
+                    search.request_focus();
+                }
                 if ui
                     .add(
                         egui::TextEdit::singleline(&mut self.secret_app_filter)
@@ -630,7 +641,9 @@ impl App {
                                 egui::Button::new("Сохранить папку")
                                     .fill(egui::Color32::from_rgb(38, 120, 155)),
                             )
-                            .clicked();
+                            .on_hover_text("Ctrl+Enter")
+                            .clicked()
+                            || super::widgets::save_requested(ui.ctx());
                         if ui.button("Отмена").clicked() {
                             self.folder_editor = None;
                             self.folder_edit_original = None;
@@ -727,9 +740,13 @@ impl App {
                                 egui::Button::new("Сохранить секрет")
                                     .fill(egui::Color32::from_rgb(38, 120, 155)),
                             )
-                            .clicked();
+                            .on_hover_text("Ctrl+Enter")
+                            .clicked()
+                            || super::widgets::save_requested(ui.ctx());
                         if ui.button("Отмена").clicked() {
-                            self.secret_editor = None;
+                            if let Some(mut secret) = self.secret_editor.take() {
+                                secret.clear();
+                            }
                         }
                     });
                     if save {

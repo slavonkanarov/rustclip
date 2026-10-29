@@ -8,6 +8,118 @@ pub(super) const ACCENT: egui::Color32 = egui::Color32::from_rgb(48, 126, 164);
 pub(super) const MUTED: egui::Color32 = egui::Color32::from_rgb(153, 167, 187);
 pub(super) const CLIP_ROW_HEIGHT: f32 = 34.;
 
+pub(super) fn back_requested(ctx: &egui::Context) -> bool {
+    let back = ctx.input_mut(|input| {
+        let escape = input.consume_key(egui::Modifiers::NONE, egui::Key::Escape);
+        let mut mouse = false;
+        input.events.retain(|event| {
+            if matches!(
+                event,
+                egui::Event::PointerButton {
+                    button: egui::PointerButton::Extra1,
+                    pressed: true,
+                    ..
+                }
+            ) {
+                mouse = true;
+                false
+            } else {
+                true
+            }
+        });
+        escape || mouse
+    });
+    if back && egui::Popup::is_any_open(ctx) {
+        egui::Popup::close_all(ctx);
+        return false;
+    }
+    back
+}
+
+pub(super) fn save_requested(ctx: &egui::Context) -> bool {
+    !egui::Popup::is_any_open(ctx)
+        && ctx.input_mut(|input| input.consume_key(egui::Modifiers::CTRL, egui::Key::Enter))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn escape() -> egui::Event {
+        egui::Event::Key {
+            key: egui::Key::Escape,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        }
+    }
+
+    fn mouse(button: egui::PointerButton) -> egui::Event {
+        egui::Event::PointerButton {
+            pos: egui::Pos2::ZERO,
+            button,
+            pressed: true,
+            modifiers: egui::Modifiers::NONE,
+        }
+    }
+
+    #[test]
+    fn back_is_consumed_once_even_with_text_focus() {
+        for event in [escape(), mouse(egui::PointerButton::Extra1)] {
+            let ctx = egui::Context::default();
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    events: vec![event],
+                    ..Default::default()
+                },
+                |ui| {
+                    ui.text_edit_singleline(&mut String::new()).request_focus();
+                    assert!(back_requested(ui.ctx()));
+                    assert!(!back_requested(ui.ctx()));
+                },
+            );
+            output.textures_delta.clear();
+        }
+    }
+
+    #[test]
+    fn back_closes_popup_without_closing_parent() {
+        for event in [escape(), mouse(egui::PointerButton::Extra1)] {
+            let ctx = egui::Context::default();
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    events: vec![event],
+                    ..Default::default()
+                },
+                |ui| {
+                    egui::Popup::open_id(ui.ctx(), egui::Id::new("picker"));
+                    assert!(!back_requested(ui.ctx()));
+                    assert!(!egui::Popup::is_any_open(ui.ctx()));
+                    assert!(!back_requested(ui.ctx()));
+                },
+            );
+            output.textures_delta.clear();
+        }
+    }
+
+    #[test]
+    fn other_mouse_buttons_do_not_cancel() {
+        let ctx = egui::Context::default();
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                events: vec![mouse(egui::PointerButton::Extra2)],
+                ..Default::default()
+            },
+            |ui| {
+                assert!(!back_requested(ui.ctx()));
+                assert_eq!(ui.input(|i| i.events.len()), 1);
+            },
+        );
+        output.textures_delta.clear();
+    }
+}
+
 pub(super) fn clip_kind(clip: &Clip) -> &'static str {
     if clip.formats.iter().any(|(format, _)| format == "15") {
         "Файлы"
@@ -336,12 +448,15 @@ pub(super) fn app_list(
     let mut close = false;
     if let Some(value) = adding.as_mut() {
         ui.horizontal(|ui| {
-            ui.add(
+            let response = ui.add(
                 egui::TextEdit::singleline(value)
                     .hint_text("Имя.exe или полный путь")
                     .desired_width(230.),
             );
-            if ui.button("Добавить").clicked() && !value.trim().is_empty() {
+            if (ui.button("Добавить").clicked()
+                || (response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter))))
+                && !value.trim().is_empty()
+            {
                 let name = value.trim();
                 if !entries
                     .lines()

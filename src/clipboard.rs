@@ -768,7 +768,7 @@ pub fn start(
                 }
                 last_sequence = seq;
             }
-            if GetAsyncKeyState(VK_ESCAPE as i32) < 0 {
+            if GetAsyncKeyState(VK_ESCAPE as i32) < 0 || GetAsyncKeyState(VK_XBUTTON1 as i32) < 0 {
                 preview.hide();
             }
             preview.tick();

@@ -96,6 +96,27 @@ impl eframe::App for App {
     }
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
+        if super::widgets::back_requested(&ctx) {
+            if let Some(mut secret) = self.secret_editor.take() {
+                secret.clear();
+            } else if self.folder_editor.take().is_some() {
+                self.folder_edit_original = None;
+            } else {
+                ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
+                self.send(Command::HidePreview);
+            }
+        }
+        if self.editor.is_none()
+            && self.secret_editor.is_none()
+            && self.folder_editor.is_none()
+            && !self.unlock_open
+            && ctx.input_mut(|i| {
+                i.modifiers.is_none() && i.consume_key(egui::Modifiers::NONE, egui::Key::F4)
+            })
+        {
+            egui::Popup::close_all(&ctx);
+            self.open_preferences();
+        }
         ui.painter().rect_filled(ui.max_rect(), 0.0, BACKGROUND);
         egui::Frame::NONE.inner_margin(20).show(ui, |ui| {
             ui.horizontal(|ui| {
@@ -107,9 +128,7 @@ impl eframe::App for App {
                         .on_hover_text("Настройки приложения · F4")
                         .clicked()
                     {
-                        self.draft = self.settings.clone();
-                        self.settings_open = true;
-                        self.focus_settings = 2;
+                        self.open_preferences();
                     }
                 });
             });
@@ -122,8 +141,7 @@ impl eframe::App for App {
                         self.send(Command::Settings(self.settings.clone()));
                     }
                     if ui.button("Настройки…     F4").clicked() {
-                        self.draft = self.settings.clone();
-                        self.settings_open = true;
+                        self.open_preferences();
                         ui.close();
                     }
                     if ui.button("Создать резервную копию").clicked() {
@@ -564,7 +582,11 @@ impl eframe::App for App {
                     self.status.clear();
                 }
             }
-            if !self.settings_open && self.editor.is_none() && !ctx.egui_wants_keyboard_input() {
+            if !self.settings_open
+                && self.editor.is_none()
+                && !egui::Popup::is_any_open(&ctx)
+                && !ctx.egui_wants_keyboard_input()
+            {
                 if ctx.input(|i| i.key_pressed(egui::Key::Enter)) {
                     self.action(&ctx, true, ctx.input(|i| i.modifiers.shift));
                 }
@@ -572,14 +594,6 @@ impl eframe::App for App {
                     if let Some(i) = self.selected {
                         self.editor = Some((Some(i), self.clips[i].text.clone()));
                     }
-                }
-                if ctx.input(|i| i.key_pressed(egui::Key::F4)) {
-                    self.draft = self.settings.clone();
-                    self.settings_open = true;
-                }
-                if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
-                    ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
-                    self.send(Command::HidePreview);
                 }
             }
             self.preferences(&ctx);
@@ -593,7 +607,9 @@ impl eframe::App for App {
                         .with_inner_size([600., 600.])
                         .with_min_inner_size([400., 300.]),
                     |ui, _| {
-                        if ui.input(|i| i.viewport().close_requested()) {
+                        if ui.input(|i| i.viewport().close_requested())
+                            || super::widgets::back_requested(ui.ctx())
+                        {
                             cancel = true;
                             return;
                         }
@@ -605,7 +621,8 @@ impl eframe::App for App {
                                     .desired_width(f32::INFINITY),
                             );
                             ui.horizontal(|ui| {
-                                save = ui.button("Сохранить").clicked();
+                                save = ui.button("Сохранить").on_hover_text("Ctrl+Enter").clicked()
+                                    || super::widgets::save_requested(ui.ctx());
                                 cancel = ui.button("Отмена").clicked();
                             });
                         }

@@ -26,6 +26,14 @@ const SETTINGS_HINTS: [&str; 7] = [
 ];
 
 impl App {
+    pub(super) fn open_preferences(&mut self) {
+        if !self.settings_open {
+            self.draft = self.settings.clone();
+        }
+        self.settings_open = true;
+        self.focus_settings = 2;
+    }
+
     fn close_preferences(&mut self) {
         if self.draft == self.settings {
             self.settings_open = false;
@@ -50,6 +58,18 @@ impl App {
                 .with_inner_size([920., 660.])
                 .with_min_inner_size([760., 500.]),
             |ui, _| {
+                if super::widgets::back_requested(ui.ctx())
+                    && self.hotkey_recorder.take().is_none()
+                {
+                    if self.confirm_discard {
+                        self.confirm_discard = false;
+                    } else if self.adding_capture.is_some() || self.adding_hotkeys.is_some() {
+                        self.adding_capture = None;
+                        self.adding_hotkeys = None;
+                    } else {
+                        self.close_preferences();
+                    }
+                }
                 if ui.input(|i| i.viewport().focused == Some(true)) {
                     self.settings_last_active = true;
                 }
@@ -137,12 +157,6 @@ impl App {
                 if self.hotkey_recorder.take().is_none() && !self.confirm_discard {
                     self.close_preferences();
                 }
-            } else if self.hotkey_recorder.is_none() && ui.input(|i| i.key_pressed(egui::Key::Escape)) {
-                if self.confirm_discard {
-                    self.confirm_discard = false;
-                } else {
-                    self.close_preferences();
-                }
             }
             self.record_hotkey(ui.ctx());
             if self.confirm_discard {
@@ -173,6 +187,10 @@ impl App {
             return;
         };
         let value = recorder.value().to_owned();
+        if value == "Esc" {
+            self.hotkey_recorder = None;
+            return;
+        }
         let mut draft = self.draft.clone();
         *[
             &mut draft.hotkey_open,
