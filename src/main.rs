@@ -15,6 +15,7 @@ struct App {
     tx: mpsc::Sender<Command>,
     rx: mpsc::Receiver<Event>,
     selected: Option<usize>,
+    scroll_to_newest: bool,
     query: String,
     snippets: bool,
     vault: Option<secrets::VaultData>,
@@ -1002,6 +1003,7 @@ impl App {
         Self {
             clips,
             selected,
+            scroll_to_newest: true,
             draft: settings.clone(),
             adding_capture: None,
             adding_hotkeys: None,
@@ -1289,6 +1291,7 @@ impl eframe::App for App {
                     self.draft.recent_apps = self.settings.recent_apps.clone();
                 }
                 Event::Open(app) => {
+                    self.scroll_to_newest = true;
                     self.pending_app = app.clone();
                     self.query.clear();
                     self.secret_app_filter.clear();
@@ -1532,10 +1535,18 @@ impl eframe::App for App {
             let height = (cols[0].available_height() - 75.).max(120.);
             cols[0].set_min_height(height);
             cols[1].set_min_height(height);
-            egui::ScrollArea::vertical()
+            let mut scroll = egui::ScrollArea::vertical()
                 .id_salt("history")
-                .max_height(cols[0].available_height() - 45.)
-                .show_rows(&mut cols[0], 24., indices.len(), |ui, range| {
+                .max_height(cols[0].available_height() - 45.);
+            if self.scroll_to_newest {
+                scroll = scroll.vertical_scroll_offset(if self.settings.newest_first {
+                    0.
+                } else {
+                    indices.len() as f32 * 24.
+                });
+                self.scroll_to_newest = false;
+            }
+            scroll.show_rows(&mut cols[0], 24., indices.len(), |ui, range| {
                     for row in range {
                         let i = indices[row];
                         let c = &self.clips[i];
@@ -1558,7 +1569,7 @@ impl eframe::App for App {
                             self.action(&ctx, true, false);
                         }
                     }
-                });
+            });
             if let Some(c) = self.selected.and_then(|i| self.clips.get(i)) {
                 cols[1].heading("Предпросмотр");
                 cols[1].label(format!("Источник: {}", c.source));
