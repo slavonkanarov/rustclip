@@ -9,6 +9,29 @@ use model::{Clip, Settings};
 use std::{collections::HashMap, sync::mpsc};
 use zeroize::Zeroize;
 
+const BACKGROUND: egui::Color32 = egui::Color32::from_rgb(20, 24, 32);
+const SURFACE: egui::Color32 = egui::Color32::from_rgb(29, 35, 46);
+const ACCENT: egui::Color32 = egui::Color32::from_rgb(48, 126, 164);
+const MUTED: egui::Color32 = egui::Color32::from_rgb(153, 167, 187);
+const SETTINGS_PAGES: [&str; 7] = [
+    "Общее",
+    "Горячие клавиши",
+    "История",
+    "Вставка",
+    "Дополнительно",
+    "Фильтрация",
+    "Секреты",
+];
+const SETTINGS_HINTS: [&str; 7] = [
+    "Сбор клипов и поведение окна приложения.",
+    "Быстрый доступ к истории и вставке из любого приложения.",
+    "Порядок, объём хранения и повторяющиеся клипы.",
+    "Поведение буфера обмена при вставке в другие приложения.",
+    "Центральное превью и ограничения размера текста.",
+    "Выберите приложения и форматы, которые нужно пропускать.",
+    "Защита и доступ к зашифрованному хранилищу.",
+];
+
 struct App {
     clips: Vec<Clip>,
     settings: Settings,
@@ -960,24 +983,39 @@ impl App {
     fn new(cc: &eframe::CreationContext<'_>, initial_target: usize) -> Self {
         cc.egui_ctx.set_theme(egui::ThemePreference::Dark);
         let mut visuals = egui::Visuals::dark();
-        visuals.panel_fill = egui::Color32::from_rgb(24, 24, 24);
-        visuals.window_fill = egui::Color32::from_rgb(24, 24, 24);
-        visuals.extreme_bg_color = egui::Color32::from_rgb(17, 17, 17);
-        visuals.selection.bg_fill = egui::Color32::from_rgb(38, 120, 155);
+        visuals.panel_fill = BACKGROUND;
+        visuals.window_fill = SURFACE;
+        visuals.extreme_bg_color = egui::Color32::from_rgb(16, 20, 28);
+        visuals.selection.bg_fill = ACCENT;
+        visuals.override_text_color = Some(egui::Color32::from_rgb(226, 232, 241));
         for widget in [
             &mut visuals.widgets.inactive,
             &mut visuals.widgets.hovered,
             &mut visuals.widgets.active,
         ] {
-            widget.corner_radius = egui::CornerRadius::same(5);
+            widget.corner_radius = egui::CornerRadius::same(7);
         }
-        visuals.widgets.inactive.bg_fill = egui::Color32::from_rgb(43, 45, 47);
-        visuals.widgets.hovered.bg_fill = egui::Color32::from_rgb(55, 59, 62);
-        visuals.widgets.active.bg_fill = egui::Color32::from_rgb(38, 120, 155);
+        visuals.widgets.inactive.bg_fill = egui::Color32::from_rgb(37, 45, 59);
+        visuals.widgets.inactive.weak_bg_fill = egui::Color32::from_rgb(37, 45, 59);
+        visuals.widgets.inactive.bg_stroke =
+            egui::Stroke::new(1., egui::Color32::from_rgb(69, 82, 101));
+        visuals.widgets.hovered.bg_fill = egui::Color32::from_rgb(44, 57, 74);
+        visuals.widgets.hovered.weak_bg_fill = egui::Color32::from_rgb(44, 57, 74);
+        visuals.widgets.active.bg_fill = ACCENT;
         cc.egui_ctx.set_visuals(visuals);
         cc.egui_ctx.style_mut_of(egui::Theme::Dark, |style| {
-            style.spacing.button_padding = egui::vec2(10.0, 5.0);
-            style.spacing.item_spacing = egui::vec2(8.0, 7.0);
+            style.spacing.button_padding = egui::vec2(14.0, 8.0);
+            style.spacing.item_spacing = egui::vec2(10.0, 10.0);
+            style.spacing.interact_size.y = 34.;
+            style
+                .text_styles
+                .insert(egui::TextStyle::Body, egui::FontId::proportional(15.));
+            style
+                .text_styles
+                .insert(egui::TextStyle::Button, egui::FontId::proportional(15.));
+            style
+                .text_styles
+                .insert(egui::TextStyle::Heading, egui::FontId::proportional(24.));
         });
         let (mut clips, mut settings, errors) = model::load();
         if std::env::args().any(|s| s == "--demo") {
@@ -1173,8 +1211,8 @@ impl App {
             egui::ViewportId::from_hash_of("rustclip-settings"),
             egui::ViewportBuilder::default()
                 .with_title("Настройки — RustClip")
-                .with_inner_size([820., 610.])
-                .with_min_inner_size([600., 420.]),
+                .with_inner_size([920., 660.])
+                .with_min_inner_size([760., 500.]),
             |ui, _| {
                 if ui.input(|i| i.viewport().focused == Some(true)) {
                     self.settings_last_active = true;
@@ -1182,21 +1220,36 @@ impl App {
                 if focus_settings {
                     ui.ctx().send_viewport_cmd(egui::ViewportCommand::Focus);
                 }
-            ui.painter().rect_filled(ui.max_rect(), 0.0, egui::Color32::from_rgb(24, 24, 24));
-            ui.heading(["Общее","Горячие клавиши","История буфера обмена","Настройки вставки","Дополнительно","Фильтрация","Секреты"][self.settings_page]);
-            if !self.status.is_empty() { ui.colored_label(egui::Color32::RED, &self.status); }
-            ui.separator();
+            ui.painter().rect_filled(ui.max_rect(), 0.0, BACKGROUND);
             let mut cancel = false;
-            egui::Panel::bottom("settings_actions").exact_size(52.).frame(egui::Frame::NONE.inner_margin(egui::Margin::symmetric(8, 8))).show(ui, |ui| {
+            egui::Panel::bottom("settings_actions").exact_size(68.).frame(egui::Frame::NONE.fill(SURFACE).inner_margin(egui::Margin::symmetric(20, 16))).show(ui, |ui| {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.button("Сохранить").clicked(){if let Err(e)=hotkeys::validate(&self.draft){self.status=e;}else{self.draft.recent_apps=self.settings.recent_apps.clone();self.settings=self.draft.clone();self.send(Command::Settings(self.settings.clone()));if let Err(e)=model::write_json(&model::directory().join("settings.json"),&self.settings){self.status=e;}else{self.settings_open=false;}}}
+                    if ui.add(egui::Button::new("Сохранить").fill(ACCENT)).clicked(){if let Err(e)=hotkeys::validate(&self.draft){self.status=e;}else{self.draft.recent_apps=self.settings.recent_apps.clone();self.settings=self.draft.clone();self.send(Command::Settings(self.settings.clone()));if let Err(e)=model::write_json(&model::directory().join("settings.json"),&self.settings){self.status=e;}else{self.settings_open=false;}}}
                     if ui.button("Отмена").clicked(){cancel=true;}
+                    if self.draft != self.settings { ui.colored_label(MUTED, "Есть несохранённые изменения"); }
                 });
             });
-            egui::ScrollArea::vertical().show(ui, |ui| {
-            ui.horizontal_top(|ui|{
-                ui.vertical(|ui|{ui.set_width(190.);for (i,name) in ["Общее","Горячие клавиши","История буфера обмена","Настройки вставки","Дополнительно","Фильтрация","Секреты"].iter().enumerate(){ui.selectable_value(&mut self.settings_page,i,*name);}});
-                ui.separator();ui.vertical(|ui|{match self.settings_page {
+            egui::Panel::left("settings_navigation").exact_size(210.).resizable(false)
+                .frame(egui::Frame::NONE.fill(SURFACE).inner_margin(18)).show(ui, |ui| {
+                    ui.heading("Настройки");
+                    ui.colored_label(MUTED, "RustClip");
+                    ui.add_space(22.);
+                    for (i, name) in SETTINGS_PAGES.iter().enumerate() {
+                        if ui.add_sized([ui.available_width(), 38.], egui::Button::new(*name).selected(self.settings_page == i)).clicked() {
+                            self.settings_page = i;
+                        }
+                    }
+                });
+            egui::CentralPanel::default().frame(egui::Frame::NONE.inner_margin(26)).show(ui, |ui| {
+                ui.heading(SETTINGS_PAGES[self.settings_page]);
+                ui.colored_label(MUTED, SETTINGS_HINTS[self.settings_page]);
+                ui.add_space(16.);
+                if !self.status.is_empty() { ui.colored_label(egui::Color32::LIGHT_RED, &self.status); }
+                egui::ScrollArea::vertical().id_salt(("settings_content", self.settings_page)).show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                egui::Frame::NONE.fill(SURFACE).corner_radius(10).inner_margin(18).show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                match self.settings_page {
                     0=>{ui.checkbox(&mut self.draft.monitor,"Следить за буфером обмена");ui.checkbox(&mut self.draft.hide_after,"Спрятаться после копирования/вставки");ui.label("Закрытие окна сворачивает RustClip в трей.");ui.label(format!("Данные: {}",model::directory().display()));},
                     1=>{
                         ui.label("Глобальные сочетания (Ctrl, Shift, Alt, Win + клавиша):");
@@ -1232,7 +1285,7 @@ impl App {
                         ui.label("Базовый список проблемных форматов встроен; читаются только поддерживаемые форматы.");
                     }
                     _=>self.setup_secrets_ui(ui),
-                }});
+                } });
             });
             });
             if cancel {
@@ -1361,206 +1414,373 @@ impl eframe::App for App {
     }
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
-        ui.painter()
-            .rect_filled(ui.max_rect(), 0.0, egui::Color32::from_rgb(24, 24, 24));
-        egui::MenuBar::new().ui(ui, |ui| {
-            ui.menu_button("Файл", |ui| {
-                if ui
-                    .checkbox(&mut self.settings.monitor, "Следить за буфером обмена")
-                    .changed()
-                {
-                    self.send(Command::Settings(self.settings.clone()));
-                }
-                if ui.button("Настройки…     F4").clicked() {
-                    self.draft = self.settings.clone();
-                    self.settings_open = true;
-                    ui.close();
-                }
-                if ui.button("Создать резервную копию").clicked() {
-                    self.status = match model::backup(&self.clips, &self.settings) {
-                        Ok(path) => format!("Резервная копия: {}", path.display()),
-                        Err(e) => e,
-                    };
-                    ui.close();
-                }
-                if ui.button("Свернуть в трей     Esc").clicked() {
-                    ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
-                    ui.close();
-                }
-                if ui.button("Выход     Alt+X").clicked() {
-                    self.quitting = true;
-                    self.send(Command::Quit);
-                    ctx.send_viewport_cmd(egui::ViewportCommand::Close);
-                }
+        ui.painter().rect_filled(ui.max_rect(), 0.0, BACKGROUND);
+        egui::Frame::NONE.inner_margin(20).show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.heading(egui::RichText::new("RustClip").strong().size(27.));
+                ui.colored_label(MUTED, "Всё скопированное — под рукой");
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui
+                        .button("Настройки")
+                        .on_hover_text("Настройки приложения · F4")
+                        .clicked()
+                    {
+                        self.draft = self.settings.clone();
+                        self.settings_open = true;
+                        self.focus_settings = 2;
+                    }
+                });
             });
-            ui.menu_button("Клип", |ui| {
-                for (name, paste, plain) in [
-                    ("Вставить в активное окно", true, false),
-                    ("Копировать в буфер обмена", false, false),
-                    ("Вставить как простой текст", true, true),
-                    ("Копировать как простой текст", false, true),
-                ] {
-                    if ui.button(name).clicked() {
-                        self.action(&ctx, paste, plain);
+            egui::MenuBar::new().ui(ui, |ui| {
+                ui.menu_button("Файл", |ui| {
+                    if ui
+                        .checkbox(&mut self.settings.monitor, "Следить за буфером обмена")
+                        .changed()
+                    {
+                        self.send(Command::Settings(self.settings.clone()));
+                    }
+                    if ui.button("Настройки…     F4").clicked() {
+                        self.draft = self.settings.clone();
+                        self.settings_open = true;
                         ui.close();
                     }
+                    if ui.button("Создать резервную копию").clicked() {
+                        self.status = match model::backup(&self.clips, &self.settings) {
+                            Ok(path) => format!("Резервная копия: {}", path.display()),
+                            Err(e) => e,
+                        };
+                        ui.close();
+                    }
+                    if ui.button("Свернуть в трей     Esc").clicked() {
+                        ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
+                        ui.close();
+                    }
+                    if ui.button("Выход     Alt+X").clicked() {
+                        self.quitting = true;
+                        self.send(Command::Quit);
+                        ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                    }
+                });
+                ui.menu_button("Клип", |ui| {
+                    for (name, paste, plain) in [
+                        ("Вставить в активное окно", true, false),
+                        ("Копировать в буфер обмена", false, false),
+                        ("Вставить как простой текст", true, true),
+                        ("Копировать как простой текст", false, true),
+                    ] {
+                        if ui.button(name).clicked() {
+                            self.action(&ctx, paste, plain);
+                            ui.close();
+                        }
+                    }
+                    if ui.button("Изменить     F2").clicked() {
+                        if let Some(i) = self.selected {
+                            self.editor = Some((Some(i), self.clips[i].text.clone()));
+                        }
+                        ui.close();
+                    }
+                    if ui.button("Удалить").clicked() {
+                        if let Some(i) = self.selected {
+                            self.remove(i);
+                        }
+                        ui.close();
+                    }
+                    if ui.button("Сохранить в файл…").clicked() {
+                        if let Some(i) = self.selected {
+                            self.status = match model::export_clip(&self.clips[i]) {
+                                Ok(p) => format!("Сохранено: {}", p.display()),
+                                Err(e) => e,
+                            };
+                        }
+                        ui.close();
+                    }
+                });
+                ui.menu_button("Вид", |ui| {
+                    ui.checkbox(&mut self.stars, "Только со звёздочкой");
+                    ui.checkbox(&mut self.settings.newest_first, "Новые сверху");
+                });
+                ui.menu_button("Ярлыки", |ui| {
+                    if let Some(i) = self.selected {
+                        if ui
+                            .checkbox(&mut self.clips[i].starred, "Звёздочка")
+                            .changed()
+                        {
+                            self.persist(i);
+                        }
+                        if ui
+                            .text_edit_singleline(&mut self.clips[i].label)
+                            .lost_focus()
+                        {
+                            self.persist(i);
+                        }
+                    }
+                });
+                ui.menu_button("Помощь", |ui| {
+                    ui.label("RustClip 0.1 — рабочая начальная версия");
+                    ui.label("GPL-3.0-or-later");
+                    ui.label("Полный список ограничений: docs/IMPLEMENTATION.md");
+                });
+            });
+            ui.separator();
+            ui.horizontal(|ui| {
+                if ui
+                    .selectable_value(&mut self.snippets, false, "История")
+                    .clicked()
+                {
+                    self.clear_secret_view();
                 }
-                if ui.button("Изменить     F2").clicked() {
+                if ui
+                    .selectable_value(&mut self.snippets, true, "Секреты")
+                    .clicked()
+                {
+                    self.filter_active_app = false;
+                    self.secret_app_filter.clear();
+                    self.select_first_folder();
+                }
+            });
+            if self.snippets {
+                self.secrets_ui(ui, &ctx);
+                if !self.status.is_empty() {
+                    ui.colored_label(egui::Color32::RED, &self.status);
+                    if ui.small_button("Скрыть сообщение").clicked() {
+                        self.status.clear();
+                    }
+                }
+                self.preferences(&ctx);
+                return;
+            }
+            ui.horizontal(|ui| {
+                if ui
+                    .add_enabled(
+                        self.selected.is_some(),
+                        egui::Button::new("Вставить").fill(ACCENT),
+                    )
+                    .on_hover_text("Вставить в активное приложение · Enter")
+                    .clicked()
+                {
+                    self.action(&ctx, true, false);
+                }
+                if ui
+                    .add_enabled(self.selected.is_some(), egui::Button::new("Копировать"))
+                    .clicked()
+                {
+                    self.action(&ctx, false, false);
+                }
+                if ui
+                    .add_enabled(self.selected.is_some(), egui::Button::new("Как текст"))
+                    .on_hover_text("Вставить без форматирования · Shift+Enter")
+                    .clicked()
+                {
+                    self.action(&ctx, true, true);
+                }
+                if ui
+                    .add_enabled(self.selected.is_some(), egui::Button::new("Изменить"))
+                    .on_hover_text("Редактировать текст клипа · F2")
+                    .clicked()
+                {
                     if let Some(i) = self.selected {
                         self.editor = Some((Some(i), self.clips[i].text.clone()));
                     }
-                    ui.close();
                 }
-                if ui.button("Удалить").clicked() {
+                if ui
+                    .add_enabled(
+                        self.selected.is_some(),
+                        egui::Button::new(
+                            if self.selected.is_some_and(|i| self.clips[i].starred) {
+                                "Убрать звёздочку"
+                            } else {
+                                "В избранное"
+                            },
+                        ),
+                    )
+                    .clicked()
+                {
+                    if let Some(i) = self.selected {
+                        self.clips[i].starred = !self.clips[i].starred;
+                        self.persist(i);
+                    }
+                }
+                if ui
+                    .add_enabled(self.selected.is_some(), egui::Button::new("Удалить"))
+                    .clicked()
+                {
                     if let Some(i) = self.selected {
                         self.remove(i);
                     }
-                    ui.close();
-                }
-                if ui.button("Сохранить в файл…").clicked() {
-                    if let Some(i) = self.selected {
-                        self.status = match model::export_clip(&self.clips[i]) {
-                            Ok(p) => format!("Сохранено: {}", p.display()),
-                            Err(e) => e,
-                        };
-                    }
-                    ui.close();
                 }
             });
-            ui.menu_button("Вид", |ui| {
-                ui.checkbox(&mut self.stars, "Только со звёздочкой");
-                ui.checkbox(&mut self.settings.newest_first, "Новые сверху");
-            });
-            ui.menu_button("Ярлыки", |ui| {
-                if let Some(i) = self.selected {
-                    if ui
-                        .checkbox(&mut self.clips[i].starred, "Звёздочка")
-                        .changed()
-                    {
-                        self.persist(i);
-                    }
-                    if ui
-                        .text_edit_singleline(&mut self.clips[i].label)
-                        .lost_focus()
-                    {
-                        self.persist(i);
-                    }
+            ui.horizontal(|ui| {
+                let search = ui.add_sized(
+                    [(ui.available_width() - 240.).max(160.), 38.],
+                    egui::TextEdit::singleline(&mut self.query)
+                        .hint_text("Поиск по тексту, приложению или ярлыку…  Ctrl+F")
+                        .margin(10.),
+                );
+                if !self.settings_open
+                    && self.editor.is_none()
+                    && ctx.input(|i| i.modifiers.ctrl && i.key_pressed(egui::Key::F))
+                {
+                    search.request_focus();
+                }
+                if ui
+                    .add_enabled(!self.query.is_empty(), egui::Button::new("Сбросить"))
+                    .clicked()
+                {
+                    self.query.clear();
+                }
+                if ui
+                    .selectable_label(self.stars, "Избранное")
+                    .on_hover_text("Включить или отключить фильтр избранного")
+                    .clicked()
+                {
+                    self.stars = !self.stars;
                 }
             });
-            ui.menu_button("Помощь", |ui| {
-                ui.label("RustClip 0.1 — рабочая начальная версия");
-                ui.label("GPL-3.0-or-later");
-                ui.label("Полный список ограничений: docs/IMPLEMENTATION.md");
-            });
-        });
-        ui.separator();
-        ui.horizontal(|ui| {
-            if ui
-                .selectable_value(&mut self.snippets, false, "История буфера обмена")
-                .clicked()
-            {
-                self.clear_secret_view();
+            let q = self.query.to_lowercase();
+            let mut indices: Vec<_> = self
+                .clips
+                .iter()
+                .enumerate()
+                .filter(|(_, c)| {
+                    c.snippet == self.snippets
+                        && (!self.stars || c.starred)
+                        && (q.is_empty()
+                            || format!("{} {} {}", c.text, c.source, c.label)
+                                .to_lowercase()
+                                .contains(&q))
+                })
+                .map(|(i, _)| i)
+                .collect();
+            if self.settings.newest_first {
+                indices.reverse();
             }
-            if ui
-                .selectable_value(&mut self.snippets, true, "Секреты")
-                .clicked()
-            {
-                self.filter_active_app = false;
-                self.secret_app_filter.clear();
-                self.select_first_folder();
+            if self.selected.is_some_and(|i| !indices.contains(&i)) || self.selected.is_none() {
+                self.selected = indices.first().copied();
             }
-        });
-        if self.snippets {
-            self.secrets_ui(ui, &ctx);
-            if !self.status.is_empty() {
-                ui.colored_label(egui::Color32::RED, &self.status);
-                if ui.small_button("Скрыть сообщение").clicked() {
-                    self.status.clear();
-                }
-            }
-            self.preferences(&ctx);
-            return;
-        }
-        ui.horizontal(|ui| {
-            if ui
-                .add(egui::Button::new("Вставить").fill(egui::Color32::from_rgb(38, 120, 155)))
-                .clicked()
-            {
-                self.action(&ctx, true, false);
-            }
-            if ui.button("Копировать").clicked() {
-                self.action(&ctx, false, false);
-            }
-            if ui.button("Текст").clicked() {
-                self.action(&ctx, true, true);
-            }
-            if ui.button("↑").on_hover_text("Предыдущий клип").clicked() {
-                self.cycle(&ctx, true, None);
-            }
-            if ui.button("↓").on_hover_text("Следующий клип").clicked() {
-                self.cycle(&ctx, false, None);
-            }
-            if ui.button("Удалить").clicked() {
-                if let Some(i) = self.selected {
-                    self.remove(i);
-                }
-            }
-        });
-        ui.horizontal(|ui| {
-            ui.label("Поиск:");
-            ui.text_edit_singleline(&mut self.query);
-            if ui.button("Очистить").clicked() {
-                self.query.clear();
-            }
-        });
-        let q = self.query.to_lowercase();
-        let mut indices: Vec<_> = self
-            .clips
-            .iter()
-            .enumerate()
-            .filter(|(_, c)| {
-                c.snippet == self.snippets
-                    && (!self.stars || c.starred)
-                    && (q.is_empty()
-                        || format!("{} {} {}", c.text, c.source, c.label)
-                            .to_lowercase()
-                            .contains(&q))
-            })
-            .map(|(i, _)| i)
-            .collect();
-        if self.settings.newest_first {
-            indices.reverse();
-        }
-        ui.columns(2, |cols| {
-            let height = (cols[0].available_height() - 75.).max(120.);
-            cols[0].set_min_height(height);
-            cols[1].set_min_height(height);
-            let mut scroll = egui::ScrollArea::vertical()
-                .id_salt("history")
-                .max_height(cols[0].available_height() - 45.);
-            if self.scroll_to_newest {
-                scroll = scroll.vertical_scroll_offset(if self.settings.newest_first {
-                    0.
-                } else {
-                    indices.len() as f32 * 24.
+            let navigating = !self.settings_open
+                && self.editor.is_none()
+                && !ctx.egui_wants_keyboard_input()
+                && ctx.input(|i| {
+                    i.key_pressed(egui::Key::ArrowUp) || i.key_pressed(egui::Key::ArrowDown)
                 });
-                self.scroll_to_newest = false;
+            if navigating {
+                if let Some(row) = indices.iter().position(|i| Some(*i) == self.selected) {
+                    self.selected = indices
+                        .get(if ctx.input(|i| i.key_pressed(egui::Key::ArrowUp)) {
+                            row.saturating_sub(1)
+                        } else {
+                            (row + 1).min(indices.len() - 1)
+                        })
+                        .copied();
+                }
             }
-            scroll.show_rows(&mut cols[0], 24., indices.len(), |ui, range| {
+            ui.add_space(6.);
+            ui.columns(2, |cols| {
+                let height = (cols[0].available_height() - 75.).max(120.);
+                cols[0].set_min_height(height);
+                cols[1].set_min_height(height);
+                cols[0].horizontal(|ui| {
+                    ui.strong("История буфера обмена");
+                    ui.colored_label(MUTED, format!("{} из {}", indices.len(), self.clips.len()));
+                });
+                cols[0].separator();
+                if indices.is_empty() {
+                    cols[0].add_space(30.);
+                    cols[0].heading(if self.query.is_empty() && !self.stars {
+                        "Здесь появятся ваши клипы"
+                    } else {
+                        "Ничего не найдено"
+                    });
+                    cols[0].colored_label(
+                        MUTED,
+                        if self.query.is_empty() && !self.stars {
+                            "Скопируйте текст или изображение при включённом мониторинге."
+                        } else {
+                            "Измените запрос или отключите фильтр избранного."
+                        },
+                    );
+                }
+                let mut scroll = egui::ScrollArea::vertical()
+                    .id_salt("history")
+                    .max_height(cols[0].available_height() - 45.);
+                if navigating {
+                    if let Some(row) = indices.iter().position(|i| Some(*i) == self.selected) {
+                        scroll = scroll.vertical_scroll_offset(row as f32 * 72.);
+                    }
+                }
+                if self.scroll_to_newest {
+                    scroll = scroll.vertical_scroll_offset(if self.settings.newest_first {
+                        0.
+                    } else {
+                        indices.len() as f32 * 72.
+                    });
+                    self.scroll_to_newest = false;
+                }
+                scroll.show_rows(&mut cols[0], 62., indices.len(), |ui, range| {
                     for row in range {
                         let i = indices[row];
                         let c = &self.clips[i];
-                        let icon = if c.starred {
-                            "★"
-                        } else if !c.png.is_empty() {
-                            "▣"
-                        } else {
-                            "≡"
-                        };
-                        let response = ui.selectable_label(
-                            self.selected == Some(i),
-                            format!("{icon} {}", c.title()),
+                        let (rect, response) = ui.allocate_exact_size(
+                            egui::vec2(ui.available_width(), 62.),
+                            egui::Sense::click(),
                         );
+                        ui.painter().rect_filled(
+                            rect,
+                            8.,
+                            if self.selected == Some(i) {
+                                egui::Color32::from_rgb(32, 66, 88)
+                            } else if response.hovered() {
+                                egui::Color32::from_rgb(38, 46, 60)
+                            } else {
+                                SURFACE
+                            },
+                        );
+                        if self.selected == Some(i) {
+                            ui.painter().rect_filled(
+                                egui::Rect::from_min_size(
+                                    rect.min + egui::vec2(0., 10.),
+                                    egui::vec2(3., 42.),
+                                ),
+                                2.,
+                                ACCENT,
+                            );
+                        }
+                        ui.scope_builder(
+                            egui::UiBuilder::new().max_rect(rect.shrink2(egui::vec2(14., 8.))),
+                            |ui| {
+                                ui.spacing_mut().item_spacing.y = 4.;
+                                ui.add(
+                                    egui::Label::new(egui::RichText::new(c.title()).strong())
+                                        .truncate(),
+                                );
+                                ui.add(
+                                    egui::Label::new(
+                                        egui::RichText::new(format!(
+                                            "{}{}{}",
+                                            if c.starred {
+                                                "Избранное · "
+                                            } else {
+                                                ""
+                                            },
+                                            if c.png.is_empty() {
+                                                "Текст"
+                                            } else {
+                                                "Изображение"
+                                            },
+                                            if c.source.is_empty() {
+                                                String::new()
+                                            } else {
+                                                format!(" · {}", c.source)
+                                            }
+                                        ))
+                                        .size(12.)
+                                        .color(MUTED),
+                                    )
+                                    .truncate(),
+                                );
+                            },
+                        );
+                        ui.advance_cursor_after_rect(rect);
                         if response.clicked() {
                             self.selected = Some(i);
                         }
@@ -1569,151 +1789,163 @@ impl eframe::App for App {
                             self.action(&ctx, true, false);
                         }
                     }
-            });
-            if let Some(c) = self.selected.and_then(|i| self.clips.get(i)) {
-                cols[1].heading("Предпросмотр");
-                cols[1].label(format!("Источник: {}", c.source));
-                cols[1].label(format!(
-                    "Форматы: {}",
-                    c.formats
-                        .iter()
-                        .map(|f| f.0.as_str())
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                ));
-                if !c.png.is_empty() {
-                    let width =
-                        (cols[1].available_width() * ctx.pixels_per_point()).max(1.0) as u32;
-                    if self.texture.as_ref().map(|t| (t.0, t.1)) != Some((c.id, width)) {
-                        if let Ok(img) = image::load_from_memory(&c.png) {
-                            let img = if img.width() > width {
-                                img.resize(
-                                    width,
-                                    ((img.height() as f64 * width as f64 / img.width() as f64)
-                                        .round() as u32)
-                                        .max(1),
-                                    image::imageops::FilterType::Lanczos3,
-                                )
+                });
+                if let Some(c) = self.selected.and_then(|i| self.clips.get(i)) {
+                    cols[1].heading("Предпросмотр");
+                    cols[1].colored_label(
+                        MUTED,
+                        format!(
+                            "Источник: {}",
+                            if c.source.is_empty() {
+                                "—"
                             } else {
-                                img
-                            };
-                            let img = img.to_rgba8();
-                            let size = [img.width() as usize, img.height() as usize];
-                            self.texture = Some((
-                                c.id,
-                                width,
-                                ctx.load_texture(
-                                    "preview",
-                                    egui::ColorImage::from_rgba_unmultiplied(size, img.as_raw()),
-                                    Default::default(),
-                                ),
+                                &c.source
+                            }
+                        ),
+                    );
+                    cols[1].colored_label(
+                        MUTED,
+                        format!(
+                            "Форматы: {}",
+                            c.formats
+                                .iter()
+                                .map(|f| f.0.as_str())
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        ),
+                    );
+                    if !c.png.is_empty() {
+                        let width =
+                            (cols[1].available_width() * ctx.pixels_per_point()).max(1.0) as u32;
+                        if self.texture.as_ref().map(|t| (t.0, t.1)) != Some((c.id, width)) {
+                            if let Ok(img) = image::load_from_memory(&c.png) {
+                                let img = if img.width() > width {
+                                    img.resize(
+                                        width,
+                                        ((img.height() as f64 * width as f64 / img.width() as f64)
+                                            .round()
+                                            as u32)
+                                            .max(1),
+                                        image::imageops::FilterType::Lanczos3,
+                                    )
+                                } else {
+                                    img
+                                };
+                                let img = img.to_rgba8();
+                                let size = [img.width() as usize, img.height() as usize];
+                                self.texture = Some((
+                                    c.id,
+                                    width,
+                                    ctx.load_texture(
+                                        "preview",
+                                        egui::ColorImage::from_rgba_unmultiplied(
+                                            size,
+                                            img.as_raw(),
+                                        ),
+                                        Default::default(),
+                                    ),
+                                ));
+                            }
+                        }
+                        if let Some((_, _, tex)) = &self.texture {
+                            cols[1].add(egui::Image::new(tex).fit_to_exact_size(
+                                tex.size_vec2()
+                                    * (cols[1].available_width() / tex.size_vec2().x).min(1.),
                             ));
                         }
+                    } else {
+                        egui::ScrollArea::vertical()
+                            .id_salt("text")
+                            .show(&mut cols[1], |ui| {
+                                ui.label(&c.text);
+                            });
                     }
-                    if let Some((_, _, tex)) = &self.texture {
-                        cols[1].add(egui::Image::new(tex).fit_to_exact_size(
-                            tex.size_vec2()
-                                * (cols[1].available_width() / tex.size_vec2().x).min(1.),
-                        ));
-                    }
-                } else {
-                    egui::ScrollArea::vertical()
-                        .id_salt("text")
-                        .show(&mut cols[1], |ui| {
-                            ui.label(&c.text);
-                        });
                 }
+            });
+            ui.separator();
+            ui.label(format!(
+                "Клипов: {}  •  {}",
+                self.clips.len(),
+                if self.settings.monitor {
+                    "Мониторинг включён"
+                } else {
+                    "Пауза"
+                }
+            ));
+            if !self.status.is_empty() {
+                ui.colored_label(egui::Color32::LIGHT_RED, &self.status);
+                if ui.small_button("Скрыть сообщение").clicked() {
+                    self.status.clear();
+                }
+            }
+            if !self.settings_open && self.editor.is_none() && !ctx.egui_wants_keyboard_input() {
+                if ctx.input(|i| i.key_pressed(egui::Key::Enter)) {
+                    self.action(&ctx, true, ctx.input(|i| i.modifiers.shift));
+                }
+                if ctx.input(|i| i.key_pressed(egui::Key::F2)) {
+                    if let Some(i) = self.selected {
+                        self.editor = Some((Some(i), self.clips[i].text.clone()));
+                    }
+                }
+                if ctx.input(|i| i.key_pressed(egui::Key::F4)) {
+                    self.draft = self.settings.clone();
+                    self.settings_open = true;
+                }
+                if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
+                    self.send(Command::HidePreview);
+                }
+            }
+            self.preferences(&ctx);
+            let mut save = false;
+            let mut cancel = false;
+            if self.editor.is_some() {
+                ctx.show_viewport_immediate(
+                    egui::ViewportId::from_hash_of("rustclip-editor"),
+                    egui::ViewportBuilder::default()
+                        .with_title("Редактор клипа — RustClip")
+                        .with_inner_size([600., 600.])
+                        .with_min_inner_size([400., 300.]),
+                    |ui, _| {
+                        if ui.input(|i| i.viewport().close_requested()) {
+                            cancel = true;
+                            return;
+                        }
+                        if let Some((_, text)) = &mut self.editor {
+                            ui.label("Сохранение заменяет исходные форматы простым текстом.");
+                            ui.add(
+                                egui::TextEdit::multiline(text)
+                                    .desired_rows(22)
+                                    .desired_width(f32::INFINITY),
+                            );
+                            ui.horizontal(|ui| {
+                                save = ui.button("Сохранить").clicked();
+                                cancel = ui.button("Отмена").clicked();
+                            });
+                        }
+                    },
+                );
+            }
+            if save {
+                if let Some((index, text)) = self.editor.take() {
+                    let mut c = clipboard::text_clip(text);
+                    if let Some(i) = index {
+                        c.id = self.clips[i].id;
+                        c.starred = self.clips[i].starred;
+                        c.label = self.clips[i].label.clone();
+                        c.snippet = self.clips[i].snippet;
+                        self.clips[i] = c;
+                        self.persist(i);
+                    } else {
+                        c.snippet = true;
+                        self.add(c);
+                    }
+                }
+            }
+            if cancel {
+                self.editor = None;
             }
         });
-        ui.separator();
-        ui.label(format!(
-            "Клипов: {}  •  {}",
-            self.clips.len(),
-            if self.settings.monitor {
-                "Мониторинг включён"
-            } else {
-                "Пауза"
-            }
-        ));
-        if !self.status.is_empty() {
-            ui.colored_label(egui::Color32::DARK_RED, &self.status);
-            if ui.small_button("Скрыть сообщение").clicked() {
-                self.status.clear();
-            }
-        }
-        if !self.settings_open && self.editor.is_none() && !ctx.egui_wants_keyboard_input() {
-            if ctx.input(|i| i.key_pressed(egui::Key::ArrowUp)) {
-                self.select_adjacent(true);
-            }
-            if ctx.input(|i| i.key_pressed(egui::Key::ArrowDown)) {
-                self.select_adjacent(false);
-            }
-            if ctx.input(|i| i.key_pressed(egui::Key::Enter)) {
-                self.action(&ctx, true, ctx.input(|i| i.modifiers.shift));
-            }
-            if ctx.input(|i| i.key_pressed(egui::Key::F2)) {
-                if let Some(i) = self.selected {
-                    self.editor = Some((Some(i), self.clips[i].text.clone()));
-                }
-            }
-            if ctx.input(|i| i.key_pressed(egui::Key::F4)) {
-                self.draft = self.settings.clone();
-                self.settings_open = true;
-            }
-            if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
-                ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
-                self.send(Command::HidePreview);
-            }
-        }
-        self.preferences(&ctx);
-        let mut save = false;
-        let mut cancel = false;
-        if self.editor.is_some() {
-            ctx.show_viewport_immediate(
-                egui::ViewportId::from_hash_of("rustclip-editor"),
-                egui::ViewportBuilder::default()
-                    .with_title("Редактор клипа — RustClip")
-                    .with_inner_size([600., 600.])
-                    .with_min_inner_size([400., 300.]),
-                |ui, _| {
-                    if ui.input(|i| i.viewport().close_requested()) {
-                        cancel = true;
-                        return;
-                    }
-                    if let Some((_, text)) = &mut self.editor {
-                        ui.label("Сохранение заменяет исходные форматы простым текстом.");
-                        ui.add(
-                            egui::TextEdit::multiline(text)
-                                .desired_rows(22)
-                                .desired_width(f32::INFINITY),
-                        );
-                        ui.horizontal(|ui| {
-                            save = ui.button("Сохранить").clicked();
-                            cancel = ui.button("Отмена").clicked();
-                        });
-                    }
-                },
-            );
-        }
-        if save {
-            if let Some((index, text)) = self.editor.take() {
-                let mut c = clipboard::text_clip(text);
-                if let Some(i) = index {
-                    c.id = self.clips[i].id;
-                    c.starred = self.clips[i].starred;
-                    c.label = self.clips[i].label.clone();
-                    c.snippet = self.clips[i].snippet;
-                    self.clips[i] = c;
-                    self.persist(i);
-                } else {
-                    c.snippet = true;
-                    self.add(c);
-                }
-            }
-        }
-        if cancel {
-            self.editor = None;
-        }
     }
 }
 fn main() -> eframe::Result {
@@ -1744,7 +1976,8 @@ fn main() -> eframe::Result {
                 eframe::icon_data::from_png_bytes(include_bytes!("../assets/icon.png"))
                     .expect("valid app icon"),
             )
-            .with_inner_size([1080., 800.]),
+            .with_inner_size([1120., 800.])
+            .with_min_inner_size([880., 560.]),
         ..Default::default()
     };
     let result = eframe::run_native(
