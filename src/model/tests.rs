@@ -16,6 +16,7 @@ fn duplicate_ignores_metadata_but_not_formats() {
 fn old_settings_gain_defaults() {
     let s: Settings = serde_json::from_str("{\"monitor\":false}").unwrap();
     assert!(!s.monitor);
+    assert!(!s.autostart);
     assert_eq!(s.paste_delay, 200);
 }
 #[test]
@@ -27,8 +28,10 @@ fn settings_can_be_saved_again() {
     let mut settings = Settings::default();
     write_json(&path, &settings).unwrap();
     settings.excluded_hotkeys = "Code.exe".into();
+    settings.autostart = true;
     write_json(&path, &settings).unwrap();
     let saved: Settings = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
     assert_eq!(saved.excluded_hotkeys, "Code.exe");
+    assert!(saved.autostart);
     fs::remove_file(path).unwrap();
 }

@@ -2,7 +2,7 @@ use super::{
     App,
     widgets::{ACCENT, BACKGROUND, MUTED, SURFACE, app_list},
 };
-use crate::{clipboard::Command, hotkeys, model};
+use crate::{autostart, clipboard::Command, hotkeys, model};
 use eframe::egui;
 use zeroize::Zeroize;
 
@@ -56,6 +56,27 @@ fn settings_navigation(ui: &mut egui::Ui, page: &mut usize, focus: bool) {
 }
 
 impl App {
+    fn save_preferences(&mut self) -> Result<(), String> {
+        hotkeys::validate(&self.draft)?;
+        self.draft.recent_apps = self.settings.recent_apps.clone();
+        if self.draft.autostart != self.settings.autostart {
+            autostart::set_enabled(self.draft.autostart)?;
+        }
+        if let Err(error) =
+            model::write_json(&model::directory().join("settings.json"), &self.draft)
+        {
+            if self.draft.autostart != self.settings.autostart {
+                autostart::set_enabled(self.settings.autostart)
+                    .map_err(|rollback| format!("{error}\n{rollback}"))?;
+            }
+            return Err(error);
+        }
+        self.settings = self.draft.clone();
+        self.send(Command::Settings(self.settings.clone()));
+        self.settings_open = false;
+        Ok(())
+    }
+
     pub(super) fn open_preferences(&mut self) {
         if !self.settings_open {
             self.draft = self.settings.clone();
@@ -111,7 +132,11 @@ impl App {
             let mut cancel = false;
             egui::Panel::bottom("settings_actions").exact_size(68.).frame(egui::Frame::NONE.fill(SURFACE).inner_margin(egui::Margin::symmetric(20, 16))).show(ui, |ui| {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.add(egui::Button::new("Сохранить").fill(ACCENT)).clicked(){if let Err(e)=hotkeys::validate(&self.draft){self.status=e;}else{self.draft.recent_apps=self.settings.recent_apps.clone();self.settings=self.draft.clone();self.send(Command::Settings(self.settings.clone()));if let Err(e)=model::write_json(&model::directory().join("settings.json"),&self.settings){self.status=e;}else{self.settings_open=false;}}}
+                    if ui.add(egui::Button::new("Сохранить").fill(ACCENT)).clicked() {
+                        if let Err(error) = self.save_preferences() {
+                            self.status = error;
+                        }
+                    }
                     if ui.button("Отмена").clicked(){cancel=true;}
                     if self.draft != self.settings { ui.colored_label(MUTED, "Есть несохранённые изменения"); }
                 });
@@ -134,7 +159,7 @@ impl App {
                 egui::Frame::NONE.fill(SURFACE).corner_radius(10).inner_margin(18).show(ui, |ui| {
                 ui.set_width(ui.available_width());
                 match self.settings_page {
-                    0=>{ui.checkbox(&mut self.draft.monitor,"Следить за буфером обмена");ui.checkbox(&mut self.draft.hide_after,"Спрятаться после копирования/вставки");ui.label("Закрытие окна сворачивает RustClip в трей.");ui.label(format!("Данные: {}",model::directory().display()));},
+                    0=>{ui.checkbox(&mut self.draft.autostart,"Запускать при входе в Windows");ui.checkbox(&mut self.draft.monitor,"Следить за буфером обмена");ui.checkbox(&mut self.draft.hide_after,"Спрятаться после копирования/вставки");ui.label("Закрытие окна сворачивает RustClip в трей.");ui.label(format!("Данные: {}",model::directory().display()));},
                     1=>{
                         ui.label("Глобальные сочетания (Ctrl, Shift, Alt, Win + клавиша):");
                         egui::Grid::new("hotkey_grid").num_columns(3).show(ui, |ui| {

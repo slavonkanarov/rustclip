@@ -47,6 +47,7 @@ impl Clip {
 #[derive(Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
+    pub autostart: bool,
     pub monitor: bool,
     pub auto_paste: bool,
     pub restore: bool,
@@ -70,6 +71,7 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Self {
+            autostart: false,
             monitor: true,
             auto_paste: true,
             restore: true,
