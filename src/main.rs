@@ -6,13 +6,211 @@ mod secrets;
 use clipboard::{Command, Event};
 use eframe::egui;
 use model::{Clip, Settings};
-use std::{collections::HashMap, sync::mpsc};
+use std::{collections::HashMap, sync::mpsc, time::Instant};
 use zeroize::Zeroize;
 
 const BACKGROUND: egui::Color32 = egui::Color32::from_rgb(20, 24, 32);
 const SURFACE: egui::Color32 = egui::Color32::from_rgb(29, 35, 46);
 const ACCENT: egui::Color32 = egui::Color32::from_rgb(48, 126, 164);
 const MUTED: egui::Color32 = egui::Color32::from_rgb(153, 167, 187);
+const CLIP_ROW_HEIGHT: f32 = 34.;
+
+fn clip_kind(clip: &Clip) -> &'static str {
+    if clip.formats.iter().any(|(format, _)| format == "15") {
+        "Файлы"
+    } else if !clip.png.is_empty() {
+        "Изображение"
+    } else if !clip.text.is_empty() {
+        "Текст"
+    } else {
+        "Данные"
+    }
+}
+
+fn clip_icon(ui: &mut egui::Ui, kind: &str) {
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(24., 24.), egui::Sense::hover());
+    let painter = ui.painter();
+    let stroke = egui::Stroke::new(1.5, egui::Color32::from_rgb(134, 193, 221));
+    let paper = egui::Rect::from_min_size(rect.min + egui::vec2(4., 2.), egui::vec2(16., 20.));
+    match kind {
+        "Изображение" => {
+            painter.rect_stroke(paper, 3., stroke, egui::StrokeKind::Inside);
+            painter.circle_filled(paper.min + egui::vec2(11., 6.), 1.5, stroke.color);
+            painter.line_segment(
+                [
+                    paper.min + egui::vec2(3., 16.),
+                    paper.min + egui::vec2(7., 11.),
+                ],
+                stroke,
+            );
+            painter.line_segment(
+                [
+                    paper.min + egui::vec2(7., 11.),
+                    paper.min + egui::vec2(13., 17.),
+                ],
+                stroke,
+            );
+        }
+        "Файлы" => {
+            painter.rect_stroke(
+                paper.translate(egui::vec2(-3., -2.)),
+                2.,
+                stroke,
+                egui::StrokeKind::Inside,
+            );
+            painter.rect_filled(paper, 2., SURFACE);
+            painter.rect_stroke(paper, 2., stroke, egui::StrokeKind::Inside);
+            painter.line_segment(
+                [
+                    paper.min + egui::vec2(4., 7.),
+                    paper.min + egui::vec2(12., 7.),
+                ],
+                stroke,
+            );
+            painter.line_segment(
+                [
+                    paper.min + egui::vec2(4., 12.),
+                    paper.min + egui::vec2(12., 12.),
+                ],
+                stroke,
+            );
+        }
+        "Текст" => {
+            painter.rect_stroke(paper, 2., stroke, egui::StrokeKind::Inside);
+            for y in [6., 10., 14.] {
+                painter.line_segment(
+                    [
+                        paper.min + egui::vec2(4., y),
+                        paper.min + egui::vec2(12., y),
+                    ],
+                    stroke,
+                );
+            }
+        }
+        _ => {
+            painter.rect_stroke(paper, 3., stroke, egui::StrokeKind::Inside);
+            for x in [5., 11.] {
+                for y in [7., 13.] {
+                    painter.circle_filled(paper.min + egui::vec2(x, y), 1.5, stroke.color);
+                }
+            }
+        }
+    }
+}
+fn secret_button(ui: &mut egui::Ui, icon: &str, hint: &str) -> egui::Response {
+    let response = ui
+        .add(
+            egui::Button::new("")
+                .min_size(egui::vec2(30., 30.))
+                .corner_radius(4),
+        )
+        .on_hover_text_at_pointer(hint);
+    let rect = response.rect;
+    let pressed = response.is_pointer_button_down_on();
+    let center = rect.center()
+        + if pressed {
+            egui::vec2(1., 1.)
+        } else {
+            egui::Vec2::ZERO
+        };
+    let painter = ui.painter();
+    painter.rect_filled(
+        rect.shrink(1.),
+        4.,
+        if pressed {
+            egui::Color32::from_rgb(54, 111, 145)
+        } else if response.hovered() {
+            egui::Color32::from_rgb(44, 70, 89)
+        } else {
+            egui::Color32::from_rgb(36, 47, 62)
+        },
+    );
+    painter.rect_stroke(
+        rect.shrink(1.),
+        4.,
+        egui::Stroke::new(
+            1.,
+            if pressed {
+                egui::Color32::WHITE
+            } else {
+                egui::Color32::from_rgb(75, 91, 110)
+            },
+        ),
+        egui::StrokeKind::Inside,
+    );
+    let stroke = egui::Stroke::new(
+        1.6,
+        if icon == "check" {
+            egui::Color32::LIGHT_GREEN
+        } else {
+            MUTED
+        },
+    );
+    match icon {
+        "copy" => {
+            painter.rect_stroke(
+                egui::Rect::from_min_size(center + egui::vec2(-6., -7.), egui::vec2(10., 11.)),
+                1.,
+                stroke,
+                egui::StrokeKind::Inside,
+            );
+            painter.rect_stroke(
+                egui::Rect::from_min_size(center + egui::vec2(-3., -4.), egui::vec2(10., 11.)),
+                1.,
+                stroke,
+                egui::StrokeKind::Inside,
+            );
+        }
+        "check" => {
+            painter.line(
+                vec![
+                    center + egui::vec2(-6., 0.),
+                    center + egui::vec2(-1., 5.),
+                    center + egui::vec2(7., -5.),
+                ],
+                stroke,
+            );
+        }
+        "delete" => {
+            painter.line_segment(
+                [center + egui::vec2(-7., -5.), center + egui::vec2(7., -5.)],
+                stroke,
+            );
+            painter.rect_stroke(
+                egui::Rect::from_min_size(center + egui::vec2(-5., -3.), egui::vec2(10., 10.)),
+                1.,
+                stroke,
+                egui::StrokeKind::Inside,
+            );
+            painter.line_segment(
+                [center + egui::vec2(-3., -7.), center + egui::vec2(3., -7.)],
+                stroke,
+            );
+        }
+        "edit" => {
+            painter.line_segment(
+                [center + egui::vec2(-5., 5.), center + egui::vec2(5., -5.)],
+                stroke,
+            );
+            painter.line_segment(
+                [center + egui::vec2(-7., 7.), center + egui::vec2(-3., 6.)],
+                stroke,
+            );
+        }
+        "show" | "hide" => {
+            painter.circle_stroke(center, 6., stroke);
+            painter.circle_filled(center, 2., stroke.color);
+            if icon == "hide" {
+                painter.line_segment(
+                    [center + egui::vec2(-8., 8.), center + egui::vec2(8., -8.)],
+                    stroke,
+                );
+            }
+        }
+        _ => {}
+    }
+    response
+}
 const SETTINGS_PAGES: [&str; 7] = [
     "Общее",
     "Горячие клавиши",
@@ -42,12 +240,17 @@ struct App {
     query: String,
     snippets: bool,
     vault: Option<secrets::VaultData>,
-    credential: String,
+    credential: Option<secrets::SessionKey>,
     credential_input: String,
     credential_confirm: String,
+    unlock_input: String,
+    unlock_open: bool,
+    unlock_for_app: bool,
+    focus_unlock: bool,
     pin_mode: bool,
     secret_editor: Option<secrets::Secret>,
     secret_selected: Option<usize>,
+    secret_copied: Option<(usize, Instant)>,
     folder_editor: Option<secrets::Folder>,
     folder_edit_original: Option<String>,
     selected_folder: Option<String>,
@@ -320,8 +523,8 @@ impl App {
         }
     }
     fn save_secrets(&mut self) {
-        if let Some(vault) = &self.vault {
-            if let Err(e) = secrets::save(&self.credential, self.pin_mode, vault) {
+        if let (Some(vault), Some(key)) = (&self.vault, &self.credential) {
+            if let Err(e) = secrets::save_session(key, self.pin_mode, vault) {
                 self.status = e;
             }
         }
@@ -349,7 +552,9 @@ impl App {
             folder: folder.clone(),
             hidden: true,
         }));
-        if let Err(e) = secrets::save(&self.credential, self.pin_mode, vault) {
+        if let Err(e) =
+            secrets::save_session(self.credential.as_ref().unwrap(), self.pin_mode, vault)
+        {
             let original_len = vault.len() - templates.len();
             vault.truncate(original_len);
             self.status = e;
@@ -368,14 +573,119 @@ impl App {
     }
     fn lock_secrets(&mut self) {
         self.clear_secret_view();
-        self.credential.zeroize();
+        self.snippets = false;
         self.credential_input.zeroize();
         self.credential_confirm.zeroize();
+        self.unlock_input.zeroize();
         self.secret_selected = None;
+        self.secret_copied = None;
         self.selected_folder = None;
         self.folder_edit_original = None;
     }
+    fn ask_unlock(&mut self, for_app: bool) {
+        self.snippets = false;
+        self.unlock_open = true;
+        self.unlock_for_app = for_app;
+        self.focus_unlock = true;
+        self.unlock_input.zeroize();
+        self.status.clear();
+        if let Ok(pin) = secrets::mode() {
+            self.pin_mode = pin;
+        }
+    }
+    fn route_app(&mut self) {
+        self.snippets = self
+            .vault
+            .as_ref()
+            .is_some_and(|vault| has_secret_for_app(vault, &self.pending_app));
+        if self.snippets {
+            self.selected_folder = None;
+            self.secret_app_filter = self
+                .pending_app
+                .rsplit('\\')
+                .next()
+                .unwrap_or(&self.pending_app)
+                .into();
+            self.filter_active_app = true;
+        }
+    }
+    fn unlock_dialog(&mut self, ctx: &egui::Context) {
+        if !self.unlock_open {
+            return;
+        }
+        let mut submit = false;
+        let mut cancel = false;
+        ctx.show_viewport_immediate(
+            egui::ViewportId::from_hash_of("rustclip-unlock"),
+            egui::ViewportBuilder::default()
+                .with_title("Разблокировать секреты — RustClip")
+                .with_inner_size([360., 170.])
+                .with_resizable(false),
+            |ui, _| {
+                if ui.input(|i| i.viewport().close_requested() || i.key_pressed(egui::Key::Escape))
+                {
+                    cancel = true;
+                    return;
+                }
+                ui.heading("Разблокировать секреты");
+                ui.label(if self.pin_mode {
+                    "Введите PIN"
+                } else {
+                    "Введите пароль"
+                });
+                let response = ui.add(
+                    egui::TextEdit::singleline(&mut self.unlock_input)
+                        .password(true)
+                        .desired_width(f32::INFINITY),
+                );
+                if self.focus_unlock {
+                    response.request_focus();
+                    ui.ctx().send_viewport_cmd(egui::ViewportCommand::Focus);
+                    self.focus_unlock = false;
+                }
+                submit = response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                if !self.status.is_empty() {
+                    ui.colored_label(egui::Color32::RED, &self.status);
+                }
+                ui.horizontal(|ui| {
+                    submit |= ui.button("Разблокировать").clicked();
+                    cancel = ui.button("Продолжить без PIN").clicked();
+                });
+            },
+        );
+        if cancel {
+            self.unlock_open = false;
+            self.snippets = false;
+            self.unlock_input.zeroize();
+            self.status.clear();
+            ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+        } else if submit {
+            match secrets::unlock_session(&self.unlock_input) {
+                Ok((vault, key)) => {
+                    self.vault = Some(vault);
+                    self.credential = Some(key);
+                    self.unlock_input.zeroize();
+                    self.status.clear();
+                    self.unlock_open = false;
+                    self.migrate_templates();
+                    if self.unlock_for_app {
+                        self.route_app();
+                    } else {
+                        self.snippets = true;
+                        self.select_first_folder();
+                    }
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+                }
+                Err(e) => {
+                    self.status = e;
+                    self.unlock_input.zeroize();
+                    self.focus_unlock = true;
+                }
+            }
+        }
+    }
     fn clear_secret_view(&mut self) {
+        self.credential = None;
         if let Some(mut vault) = self.vault.take() {
             for secret in &mut vault.secrets {
                 secret.clear();
@@ -394,14 +704,14 @@ impl App {
         }
     }
     fn secret_action(&mut self, ctx: &egui::Context, paste: bool) {
-        if let Some(secret) = self
-            .vault
-            .as_ref()
-            .and_then(|v| self.secret_selected.and_then(|i| v.get(i)))
-        {
+        if let Some((i, secret)) = self.vault.as_ref().and_then(|v| {
+            self.secret_selected
+                .and_then(|i| v.get(i).map(|secret| (i, secret)))
+        }) {
             self.send(Command::Secret(
                 clipboard::text_clip(secret.value.clone()),
                 paste,
+                i,
             ));
             if paste && self.settings.hide_after {
                 ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
@@ -450,12 +760,19 @@ impl App {
                     &secrets::VaultData::default(),
                 ) {
                     Ok(()) => {
-                        self.credential = std::mem::take(&mut self.credential_input);
-                        self.credential_confirm.clear();
-                        self.vault = Some(secrets::VaultData::default());
-                        self.status.clear();
-                        self.migrate_templates();
-                        self.clear_secret_view();
+                        let session = secrets::unlock_session(&self.credential_input);
+                        self.credential_input.zeroize();
+                        self.credential_confirm.zeroize();
+                        match session {
+                            Ok((vault, key)) => {
+                                self.credential = Some(key);
+                                self.vault = Some(vault);
+                                self.status.clear();
+                                self.migrate_templates();
+                                self.clear_secret_view();
+                            }
+                            Err(e) => self.status = e,
+                        }
                     }
                     Err(e) => self.status = e,
                 }
@@ -472,51 +789,7 @@ impl App {
             }
             return;
         }
-        if self.vault.is_none() && !self.credential.is_empty() {
-            match secrets::unlock(&self.credential) {
-                Ok(vault) => {
-                    self.vault = Some(vault);
-                    self.select_first_folder();
-                }
-                Err(e) => {
-                    self.lock_secrets();
-                    self.status = e;
-                }
-            }
-        }
         if self.vault.is_none() {
-            ui.heading("Разблокировать секреты");
-            if let Ok(pin) = secrets::mode() {
-                ui.label(if pin {
-                    "Введите PIN"
-                } else {
-                    "Введите пароль"
-                });
-            }
-            let response =
-                ui.add(egui::TextEdit::singleline(&mut self.credential_input).password(true));
-            if ui.button("Разблокировать").clicked()
-                || response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter))
-            {
-                if self.credential_input.is_empty() {
-                    self.status = "Введите PIN или пароль".into();
-                } else {
-                    let result = secrets::unlock(&self.credential_input);
-                    match result {
-                        Ok(vault) => {
-                            self.status.clear();
-                            self.vault = Some(vault);
-                            self.credential = std::mem::take(&mut self.credential_input);
-                            if let Ok(pin) = secrets::mode() {
-                                self.pin_mode = pin;
-                            }
-                            self.migrate_templates();
-                            self.select_first_folder();
-                        }
-                        Err(e) => self.status = e,
-                    }
-                }
-            }
             return;
         }
         ui.horizontal(|ui| {
@@ -626,6 +899,12 @@ impl App {
             });
         egui::CentralPanel::default().show(ui, |ui| {
             ui.separator();
+            if self
+                .secret_copied
+                .is_some_and(|(_, at)| at.elapsed().as_secs() >= 3)
+            {
+                self.secret_copied = None;
+            }
             ui.heading(
                 if self.filter_active_app || !self.secret_app_filter.is_empty() {
                     "Поиск по приложению"
@@ -687,87 +966,91 @@ impl App {
                             visible += 1;
                             egui::Frame::group(ui.style())
                                 .corner_radius(egui::CornerRadius::same(8))
-                                .inner_margin(egui::Margin::same(12))
+                                .inner_margin(egui::Margin::symmetric(10, 6))
                                 .fill(if self.secret_selected == Some(i) {
-                                    egui::Color32::from_rgb(32, 58, 70)
+                                    egui::Color32::from_rgb(32, 66, 88)
                                 } else {
-                                    egui::Color32::from_rgb(37, 40, 43)
+                                    SURFACE
                                 })
                                 .show(ui, |ui| {
-                                    ui.set_width((ui.available_width() - 24.).max(120.).min(700.));
-                                    ui.set_min_height(110.);
-                                    let response = ui.add(
-                                        egui::Label::new(&secret.name)
-                                            .truncate()
-                                            .sense(egui::Sense::click()),
-                                    );
-                                    if response.clicked() {
-                                        self.secret_selected = Some(i);
-                                    }
-                                    if response.double_clicked() {
-                                        self.secret_selected = Some(i);
-                                        paste = true;
-                                    }
-                                    if secret.hidden {
-                                        ui.label("Значение: ••••••••");
-                                    } else {
-                                        ui.add(
-                                            egui::Label::new(format!(
-                                                "Значение: {}",
-                                                secret.value.replace(['\r', '\n'], " ")
-                                            ))
-                                            .truncate(),
-                                        );
-                                    }
-                                    let app = self.vault.as_ref().unwrap().app_for(secret);
-                                    if !app.is_empty() {
-                                        ui.add(
-                                            egui::Label::new(format!(
-                                                "{}: {app}",
-                                                if secret.app.is_empty() {
-                                                    "Приложение папки"
-                                                } else {
-                                                    "Приложение"
-                                                }
-                                            ))
-                                            .truncate(),
-                                        );
-                                    }
-                                    if !secret.folder.is_empty() {
-                                        ui.add(
-                                            egui::Label::new(format!("📁 {}", secret.folder))
-                                                .truncate(),
-                                        );
-                                    }
+                                    ui.set_width(ui.available_width().min(700.));
                                     ui.horizontal(|ui| {
-                                        if ui.small_button("Вставить").clicked() {
+                                        let text_width = (ui.available_width() - 155.).max(100.);
+                                        let text = ui.vertical(|ui| {
+                                            ui.set_width(text_width);
+                                            ui.add(
+                                                egui::Label::new(
+                                                    egui::RichText::new(&secret.name).strong(),
+                                                )
+                                                .truncate(),
+                                            );
+                                            ui.add(
+                                                egui::Label::new(if secret.hidden {
+                                                    "••••••••".into()
+                                                } else {
+                                                    secret.value.replace(['\r', '\n'], " ")
+                                                })
+                                                .truncate(),
+                                            );
+                                        });
+                                        let response = text.response.interact(egui::Sense::click());
+                                        if response.clicked() {
+                                            self.secret_selected = Some(i);
+                                        }
+                                        if response.double_clicked() {
                                             self.secret_selected = Some(i);
                                             paste = true;
                                         }
-                                        if ui.small_button("Копировать").clicked() {
-                                            self.secret_selected = Some(i);
-                                            copy = true;
-                                        }
-                                    });
-                                    ui.horizontal(|ui| {
-                                        if ui
-                                            .small_button(if secret.hidden {
-                                                "Показать"
-                                            } else {
-                                                "Скрыть"
-                                            })
-                                            .clicked()
-                                        {
-                                            toggle_visibility = Some(i);
-                                        }
-                                        if ui.small_button("Изменить").clicked() {
-                                            self.secret_selected = Some(i);
-                                            edit = true;
-                                        }
-                                        if ui.small_button("Удалить").clicked() {
-                                            self.secret_selected = Some(i);
-                                            delete = true;
-                                        }
+                                        ui.with_layout(
+                                            egui::Layout::right_to_left(egui::Align::Center),
+                                            |ui| {
+                                                ui.spacing_mut().item_spacing.x = 4.;
+                                                let copied = self.secret_copied.is_some_and(
+                                                    |(index, at)| {
+                                                        index == i && at.elapsed().as_secs() < 3
+                                                    },
+                                                );
+                                                if secret_button(ui, "delete", "Удалить секрет")
+                                                    .clicked()
+                                                {
+                                                    self.secret_selected = Some(i);
+                                                    delete = true;
+                                                }
+                                                if secret_button(ui, "edit", "Изменить секрет")
+                                                    .clicked()
+                                                {
+                                                    self.secret_selected = Some(i);
+                                                    edit = true;
+                                                }
+                                                if secret_button(
+                                                    ui,
+                                                    if secret.hidden { "show" } else { "hide" },
+                                                    if secret.hidden {
+                                                        "Показать значение"
+                                                    } else {
+                                                        "Скрыть значение"
+                                                    },
+                                                )
+                                                .clicked()
+                                                {
+                                                    toggle_visibility = Some(i);
+                                                }
+                                                if secret_button(
+                                                    ui,
+                                                    if copied { "check" } else { "copy" },
+                                                    if copied {
+                                                        "Скопировано в буфер обмена"
+                                                    } else {
+                                                        "Скопировать значение"
+                                                    },
+                                                )
+                                                .clicked()
+                                                {
+                                                    self.secret_selected = Some(i);
+                                                    copy = true;
+                                                }
+                                            },
+                                        );
                                     });
                                 });
                         }
@@ -806,6 +1089,7 @@ impl App {
             if let Some(i) = self.secret_selected.take() {
                 if i < self.vault.as_ref().unwrap().len() {
                     self.vault.as_mut().unwrap().remove(i).clear();
+                    self.secret_copied = None;
                     self.save_secrets();
                 }
             }
@@ -1004,6 +1288,8 @@ impl App {
         visuals.widgets.active.bg_fill = ACCENT;
         cc.egui_ctx.set_visuals(visuals);
         cc.egui_ctx.style_mut_of(egui::Theme::Dark, |style| {
+            style.interaction.tooltip_delay = 0.1;
+            style.interaction.show_tooltips_only_when_still = false;
             style.spacing.button_padding = egui::vec2(14.0, 8.0);
             style.spacing.item_spacing = egui::vec2(10.0, 10.0);
             style.spacing.interact_size.y = 34.;
@@ -1052,12 +1338,17 @@ impl App {
             query: String::new(),
             snippets: false,
             vault: None,
-            credential: String::new(),
+            credential: None,
             credential_input: String::new(),
             credential_confirm: String::new(),
+            unlock_input: String::new(),
+            unlock_open: false,
+            unlock_for_app: false,
+            focus_unlock: false,
             pin_mode: secrets::mode().unwrap_or(true),
             secret_editor: None,
             secret_selected: None,
+            secret_copied: None,
             folder_editor: None,
             folder_edit_original: None,
             selected_folder: None,
@@ -1203,6 +1494,8 @@ impl App {
     fn preferences(&mut self, ctx: &egui::Context) {
         if !self.settings_open {
             self.focus_settings = 0;
+            self.credential_input.zeroize();
+            self.credential_confirm.zeroize();
             return;
         }
         let focus_settings = self.focus_settings == 1;
@@ -1349,25 +1642,12 @@ impl eframe::App for App {
                     self.query.clear();
                     self.secret_app_filter.clear();
                     self.filter_active_app = false;
-                    if self.vault.is_none() && !self.credential.is_empty() {
-                        match secrets::unlock(&self.credential) {
-                            Ok(vault) => self.vault = Some(vault),
-                            Err(e) => {
-                                self.lock_secrets();
-                                self.status = e;
-                            }
-                        }
-                    }
-                    self.snippets = self
-                        .vault
-                        .as_ref()
-                        .is_some_and(|vault| has_secret_for_app(vault, &app));
-                    if self.snippets {
-                        self.selected_folder = None;
-                        self.secret_app_filter = app.rsplit('\\').next().unwrap_or(&app).into();
-                        self.filter_active_app = true;
+                    if self.vault.is_none() && secrets::exists() && !app.is_empty() {
+                        self.ask_unlock(true);
                     } else {
-                        self.clear_secret_view();
+                        self.unlock_open = false;
+                        self.unlock_input.zeroize();
+                        self.route_app();
                     }
                     ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
                     ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
@@ -1392,7 +1672,14 @@ impl eframe::App for App {
                         }
                     }
                 }
-                Event::Error(e) => self.status = e,
+                Event::Error(e) => {
+                    self.secret_copied = None;
+                    self.status = e;
+                }
+                Event::SecretCopied(i) => {
+                    self.status.clear();
+                    self.secret_copied = Some((i, Instant::now()));
+                }
                 Event::Quit => {
                     self.quitting = true;
                     ctx.send_viewport_cmd(egui::ViewportCommand::Close);
@@ -1421,7 +1708,7 @@ impl eframe::App for App {
                 ui.colored_label(MUTED, "Всё скопированное — под рукой");
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui
-                        .button("Настройки")
+                        .button("⚙ Настройки")
                         .on_hover_text("Настройки приложения · F4")
                         .clicked()
                     {
@@ -1527,7 +1814,8 @@ impl eframe::App for App {
                     .selectable_value(&mut self.snippets, false, "История")
                     .clicked()
                 {
-                    self.clear_secret_view();
+                    self.unlock_open = false;
+                    self.unlock_input.zeroize();
                 }
                 if ui
                     .selectable_value(&mut self.snippets, true, "Секреты")
@@ -1535,9 +1823,14 @@ impl eframe::App for App {
                 {
                     self.filter_active_app = false;
                     self.secret_app_filter.clear();
-                    self.select_first_folder();
+                    if self.vault.is_none() && secrets::exists() {
+                        self.ask_unlock(false);
+                    } else {
+                        self.select_first_folder();
+                    }
                 }
             });
+            self.unlock_dialog(&ctx);
             if self.snippets {
                 self.secrets_ui(ui, &ctx);
                 if !self.status.is_empty() {
@@ -1559,12 +1852,6 @@ impl eframe::App for App {
                     .clicked()
                 {
                     self.action(&ctx, true, false);
-                }
-                if ui
-                    .add_enabled(self.selected.is_some(), egui::Button::new("Копировать"))
-                    .clicked()
-                {
-                    self.action(&ctx, false, false);
                 }
                 if ui
                     .add_enabled(self.selected.is_some(), egui::Button::new("Как текст"))
@@ -1608,6 +1895,15 @@ impl eframe::App for App {
                         self.remove(i);
                     }
                 }
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui
+                        .add_enabled(self.selected.is_some(), egui::Button::new("📋 Копировать"))
+                        .on_hover_text("Скопировать клип в буфер обмена")
+                        .clicked()
+                    {
+                        self.action(&ctx, false, false);
+                    }
+                });
             });
             ui.horizontal(|ui| {
                 let search = ui.add_sized(
@@ -1700,33 +1996,42 @@ impl eframe::App for App {
                         },
                     );
                 }
+                let viewport_height = cols[0].available_height() - 45.;
+                cols[0].spacing_mut().item_spacing.y = 4.;
+                let row_stride = CLIP_ROW_HEIGHT + cols[0].spacing().item_spacing.y;
                 let mut scroll = egui::ScrollArea::vertical()
                     .id_salt("history")
-                    .max_height(cols[0].available_height() - 45.);
+                    .max_height(viewport_height);
                 if navigating {
                     if let Some(row) = indices.iter().position(|i| Some(*i) == self.selected) {
-                        scroll = scroll.vertical_scroll_offset(row as f32 * 72.);
+                        scroll = scroll.vertical_scroll_offset(
+                            (row as f32 * row_stride - viewport_height / 2.).max(0.),
+                        );
                     }
                 }
                 if self.scroll_to_newest {
                     scroll = scroll.vertical_scroll_offset(if self.settings.newest_first {
                         0.
                     } else {
-                        indices.len() as f32 * 72.
+                        (indices.len() as f32 * row_stride
+                            - cols[0].spacing().item_spacing.y
+                            - viewport_height)
+                            .max(0.)
                     });
                     self.scroll_to_newest = false;
                 }
-                scroll.show_rows(&mut cols[0], 62., indices.len(), |ui, range| {
+                scroll.show_rows(&mut cols[0], CLIP_ROW_HEIGHT, indices.len(), |ui, range| {
                     for row in range {
                         let i = indices[row];
                         let c = &self.clips[i];
+                        let kind = clip_kind(c);
                         let (rect, response) = ui.allocate_exact_size(
-                            egui::vec2(ui.available_width(), 62.),
+                            egui::vec2(ui.available_width(), CLIP_ROW_HEIGHT),
                             egui::Sense::click(),
                         );
                         ui.painter().rect_filled(
                             rect,
-                            8.,
+                            6.,
                             if self.selected == Some(i) {
                                 egui::Color32::from_rgb(32, 66, 88)
                             } else if response.hovered() {
@@ -1738,53 +2043,39 @@ impl eframe::App for App {
                         if self.selected == Some(i) {
                             ui.painter().rect_filled(
                                 egui::Rect::from_min_size(
-                                    rect.min + egui::vec2(0., 10.),
-                                    egui::vec2(3., 42.),
+                                    rect.min + egui::vec2(0., 6.),
+                                    egui::vec2(3., CLIP_ROW_HEIGHT - 12.),
                                 ),
                                 2.,
                                 ACCENT,
                             );
                         }
-                        ui.scope_builder(
-                            egui::UiBuilder::new().max_rect(rect.shrink2(egui::vec2(14., 8.))),
+                        let text_clicks = ui.scope_builder(
+                            egui::UiBuilder::new().max_rect(rect.shrink2(egui::vec2(10., 4.))),
                             |ui| {
-                                ui.spacing_mut().item_spacing.y = 4.;
-                                ui.add(
-                                    egui::Label::new(egui::RichText::new(c.title()).strong())
+                                ui.horizontal(|ui| {
+                                    clip_icon(ui, kind);
+                                    let title = ui.add(
+                                        egui::Label::new(
+                                            egui::RichText::new(if c.starred {
+                                                format!("★ {}", c.title())
+                                            } else {
+                                                c.title()
+                                            })
+                                            .strong(),
+                                        )
                                         .truncate(),
-                                );
-                                ui.add(
-                                    egui::Label::new(
-                                        egui::RichText::new(format!(
-                                            "{}{}{}",
-                                            if c.starred {
-                                                "Избранное · "
-                                            } else {
-                                                ""
-                                            },
-                                            if c.png.is_empty() {
-                                                "Текст"
-                                            } else {
-                                                "Изображение"
-                                            },
-                                            if c.source.is_empty() {
-                                                String::new()
-                                            } else {
-                                                format!(" · {}", c.source)
-                                            }
-                                        ))
-                                        .size(12.)
-                                        .color(MUTED),
-                                    )
-                                    .truncate(),
-                                );
+                                    );
+                                    (title.clicked(), title.double_clicked())
+                                })
+                                .inner
                             },
                         );
                         ui.advance_cursor_after_rect(rect);
-                        if response.clicked() {
+                        if response.clicked() || text_clicks.inner.0 {
                             self.selected = Some(i);
                         }
-                        if response.double_clicked() {
+                        if response.double_clicked() || text_clicks.inner.1 {
                             self.selected = Some(i);
                             self.action(&ctx, true, false);
                         }

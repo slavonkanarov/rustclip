@@ -18,7 +18,7 @@ use windows_sys::Win32::{
 pub enum Command {
     Copy(Clip, bool, Option<usize>),
     Paste(Clip, bool, Option<usize>, Option<usize>),
-    Secret(Clip, bool),
+    Secret(Clip, bool, usize),
     Settings(Settings),
     HidePreview,
     Quit,
@@ -31,6 +31,7 @@ pub enum Event {
     Next(usize),
     PlainPaste(usize),
     Error(String),
+    SecretCopied(usize),
     Quit,
 }
 pub fn wide(s: &str) -> Vec<u16> {
@@ -664,13 +665,16 @@ pub fn start(
                         }
                         preview.show(&clip, target, settings.preview_ms, number);
                     }
-                    Command::Secret(clip, should_paste) => {
+                    Command::Secret(clip, should_paste, index) => {
                         if should_paste {
                             let old = capture(hwnd, &settings, true).ok().flatten();
                             pending = Some((clip, true, old, target, true));
                         } else {
                             match publish(hwnd, &clip, true) {
-                                Ok(seq) => secret_sequences.push(seq),
+                                Ok(seq) => {
+                                    secret_sequences.push(seq);
+                                    let _ = tx.send(Event::SecretCopied(index));
+                                }
                                 Err(e) => {
                                     let _ = tx.send(Event::Error(e));
                                 }

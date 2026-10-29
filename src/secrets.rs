@@ -109,6 +109,18 @@ struct VaultFile {
     ciphertext: Vec<u8>,
 }
 
+pub struct SessionKey {
+    key: [u8; 32],
+    salt: [u8; 16],
+}
+
+impl Drop for SessionKey {
+    fn drop(&mut self) {
+        self.key.zeroize();
+        self.salt.zeroize();
+    }
+}
+
 pub fn exists() -> bool {
     path().exists()
 }
@@ -134,21 +146,31 @@ fn key(password: &str, salt: &[u8; 16]) -> Result<[u8; 32], String> {
     Ok(key)
 }
 
-pub fn unlock(password: &str) -> Result<VaultData, String> {
+pub fn unlock_session(password: &str) -> Result<(VaultData, SessionKey), String> {
     let file = read_file()?;
+    let session = SessionKey {
+        key: key(password, &file.salt)?,
+        salt: file.salt,
+    };
     let pin = file.pin;
-    let mut vault = unlock_file(password, file)?;
+    let mut vault = decrypt(&session.key, file)?;
     if vault.place_unfiled() {
-        save(password, pin, &vault)?;
+        save_session(&session, pin, &vault)?;
     }
-    Ok(vault)
+    Ok((vault, session))
 }
 
+#[cfg(test)]
 fn unlock_file(password: &str, file: VaultFile) -> Result<VaultData, String> {
     let mut key = key(password, &file.salt)?;
-    let plaintext = ChaCha20Poly1305::new(&key.into())
-        .decrypt(Nonce::from_slice(&file.nonce), file.ciphertext.as_ref());
+    let result = decrypt(&key, file);
     key.zeroize();
+    result
+}
+
+fn decrypt(key: &[u8; 32], file: VaultFile) -> Result<VaultData, String> {
+    let plaintext = ChaCha20Poly1305::new(key.into())
+        .decrypt(Nonce::from_slice(&file.nonce), file.ciphertext.as_ref());
     let mut plaintext =
         plaintext.map_err(|_| "Неверный PIN/пароль или повреждено хранилище".to_string())?;
     let result = serde_json::from_slice(&plaintext)
@@ -165,6 +187,29 @@ fn unlock_file(password: &str, file: VaultFile) -> Result<VaultData, String> {
 
 pub fn save(password: &str, pin: bool, vault: &VaultData) -> Result<(), String> {
     model::write_json(&path(), &encrypt(password, pin, vault)?)
+}
+
+pub fn save_session(session: &SessionKey, pin: bool, vault: &VaultData) -> Result<(), String> {
+    model::write_json(&path(), &encrypt_session(session, pin, vault)?)
+}
+
+fn encrypt_session(
+    session: &SessionKey,
+    pin: bool,
+    vault: &VaultData,
+) -> Result<VaultFile, String> {
+    let mut nonce = [0; 12];
+    rand::rngs::OsRng.fill_bytes(&mut nonce);
+    let mut plaintext = serde_json::to_vec(vault).map_err(|e| e.to_string())?;
+    let ciphertext = ChaCha20Poly1305::new((&session.key).into())
+        .encrypt(Nonce::from_slice(&nonce), plaintext.as_ref());
+    plaintext.zeroize();
+    Ok(VaultFile {
+        pin,
+        salt: session.salt,
+        nonce,
+        ciphertext: ciphertext.map_err(|e| e.to_string())?,
+    })
 }
 
 fn encrypt(password: &str, pin: bool, vault: &VaultData) -> Result<VaultFile, String> {
@@ -196,6 +241,31 @@ mod tests {
         let salt = [7; 16];
         assert_ne!(key("1234", &salt).unwrap(), key("1235", &salt).unwrap());
         assert_ne!(key("1234", &salt).unwrap(), key("1234", &[8; 16]).unwrap());
+    }
+    #[test]
+    fn session_saves_existing_vault_without_password() {
+        let vault = VaultData {
+            secrets: vec![Secret {
+                name: "Пример".into(),
+                value: "значение".into(),
+                app: String::new(),
+                folder: String::new(),
+                hidden: true,
+            }],
+            folders: Vec::new(),
+        };
+        let original = encrypt("1234", true, &vault).unwrap();
+        let session = SessionKey {
+            key: key("1234", &original.salt).unwrap(),
+            salt: original.salt,
+        };
+        assert_eq!(
+            decrypt(&session.key, original).unwrap()[0].value,
+            "значение"
+        );
+        let updated = encrypt_session(&session, true, &vault).unwrap();
+        assert_eq!(updated.salt, session.salt);
+        assert_eq!(decrypt(&session.key, updated).unwrap()[0].value, "значение");
     }
     #[test]
     fn vault_contains_no_plaintext_and_requires_password() {
