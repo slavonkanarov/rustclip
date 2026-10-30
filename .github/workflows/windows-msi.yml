@@ -45,10 +45,10 @@ jobs:
           $buildVersion = switch -Regex ($env:GITHUB_REF) {
             '^refs/heads/dev$' { "$version-dev.$env:GITHUB_RUN_NUMBER"; break }
             '^refs/heads/release$' { "$version-rc.$env:GITHUB_RUN_NUMBER"; break }
-            '^refs/heads/main$' { $version; break }
+            '^refs/heads/main$' { "$version-main.$env:GITHUB_RUN_NUMBER.$env:GITHUB_RUN_ATTEMPT"; break }
             '^refs/tags/v(.+)$' {
               $tagVersion = $Matches[1]
-              if ($tagVersion -notmatch "^$([regex]::Escape($version))(-rc\.(0|[1-9]\d*))?$") {
+              if ($tagVersion -notmatch "^$([regex]::Escape($version))(-(rc\.(0|[1-9]\d*)|main\.[1-9]\d*\.[1-9]\d*))?$") {
                 throw "Tag $env:GITHUB_REF_NAME does not match Cargo.toml version $version"
               }
               $branch = if ($tagVersion -match '-rc\.') { 'release' } else { 'main' }
@@ -131,22 +131,13 @@ jobs:
           options=(--verify-tag)
           if [[ "$GITHUB_REF" == refs/heads/main ]]; then
             tag="v${{ needs.build.outputs.version }}"
-            tag_object=$(gh api "repos/$GH_REPO/git/matching-refs" --paginate --jq ".[] | select(.ref == \"refs/tags/$tag\") | .object.sha")
-            if [[ -n "$tag_object" ]]; then
-              tagged_commit=$(gh api "repos/$GH_REPO/commits/$tag" --jq '.sha')
-              if [[ "$tagged_commit" != "$GITHUB_SHA" ]]; then
-                echo "::error::Tag $tag already points to $tagged_commit. Bump the version in Cargo.toml before the next release."
-                exit 1
-              fi
-            else
-              options=(--target "$GITHUB_SHA")
-            fi
+            options=(--target "$GITHUB_SHA")
           fi
           if gh release view "$tag" >/dev/null 2>&1; then
             echo "::notice::Release $tag already exists"
             exit 0
           fi
-          if [[ "$tag" == *-rc.* ]]; then
+          if [[ "$tag" == *-rc.* || "$tag" == *-main.* ]]; then
             options+=(--prerelease --latest=false)
           fi
           gh release create "$tag" package/* \

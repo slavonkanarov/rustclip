@@ -15,7 +15,7 @@ if ($LASTEXITCODE -ne 0) { throw 'cargo metadata failed' }
 $version = ($metadata.packages | Where-Object name -eq 'rustclip').version
 if ($version -notmatch '^\d+\.\d+\.\d+$') { throw "MSI requires a three-part version: $version" }
 $buildVersion = if ($env:RUSTCLIP_BUILD_VERSION) { $env:RUSTCLIP_BUILD_VERSION } else { $version }
-if ($buildVersion -notmatch "^$([regex]::Escape($version))(-(dev|rc)\.(0|[1-9]\d*))?$") {
+if ($buildVersion -notmatch "^$([regex]::Escape($version))(-((dev|rc)\.(0|[1-9]\d*)|main\.[1-9]\d*\.[1-9]\d*))?$") {
     throw "Build version must match Cargo.toml: $buildVersion"
 }
 $parts = $version.Split('.')
