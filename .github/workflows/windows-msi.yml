@@ -15,6 +15,8 @@ jobs:
   build:
     runs-on: windows-2025
     timeout-minutes: 40
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     defaults:
       run:
         shell: pwsh
@@ -34,6 +36,7 @@ jobs:
         run: cargo fmt --all -- --check
 
       - name: Set build version
+        id: version
         run: |
           $metadata = cargo metadata --no-deps --format-version 1 --locked | ConvertFrom-Json
           if ($LASTEXITCODE -ne 0) { throw 'cargo metadata failed' }
@@ -57,6 +60,7 @@ jobs:
             default { "$version-dev.$env:GITHUB_RUN_NUMBER" }
           }
           Add-Content -Path $env:GITHUB_ENV -Value "RUSTCLIP_BUILD_VERSION=$buildVersion"
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "version=$buildVersion"
 
       - name: Run Rust tests
         run: cargo test --locked --target x86_64-pc-windows-msvc
@@ -106,7 +110,7 @@ jobs:
           if-no-files-found: ignore
 
   release:
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
     needs: build
     runs-on: ubuntu-latest
     permissions:
@@ -123,9 +127,27 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
-          options=()
-          if [[ "$GITHUB_REF_NAME" == *-rc.* ]]; then
-            options=(--prerelease --latest=false)
+          tag="$GITHUB_REF_NAME"
+          options=(--verify-tag)
+          if [[ "$GITHUB_REF" == refs/heads/main ]]; then
+            tag="v${{ needs.build.outputs.version }}"
+            tag_object=$(gh api "repos/$GH_REPO/git/matching-refs" --paginate --jq ".[] | select(.ref == \"refs/tags/$tag\") | .object.sha")
+            if [[ -n "$tag_object" ]]; then
+              tagged_commit=$(gh api "repos/$GH_REPO/commits/$tag" --jq '.sha')
+              if [[ "$tagged_commit" != "$GITHUB_SHA" ]]; then
+                echo "::error::Tag $tag already points to $tagged_commit. Bump the version in Cargo.toml before the next release."
+                exit 1
+              fi
+            else
+              options=(--target "$GITHUB_SHA")
+            fi
           fi
-          gh release create "$GITHUB_REF_NAME" package/* \
-            --verify-tag --title "RustClip ${GITHUB_REF_NAME#v}" --generate-notes "${options[@]}"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "::notice::Release $tag already exists"
+            exit 0
+          fi
+          if [[ "$tag" == *-rc.* ]]; then
+            options+=(--prerelease --latest=false)
+          fi
+          gh release create "$tag" package/* \
+            --title "RustClip ${tag#v}" --generate-notes "${options[@]}"
