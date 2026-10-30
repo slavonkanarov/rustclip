@@ -214,7 +214,10 @@ impl eframe::App for App {
                     }
                 });
                 ui.menu_button("Помощь", |ui| {
-                    ui.label("RustClip 0.1 — рабочая начальная версия");
+                    ui.label(format!(
+                        "RustClip {}",
+                        option_env!("RUSTCLIP_BUILD_VERSION").unwrap_or(env!("CARGO_PKG_VERSION"))
+                    ));
                     ui.label("GPL-3.0-or-later");
                     ui.label("Полный список ограничений: docs/IMPLEMENTATION.md");
                 });
