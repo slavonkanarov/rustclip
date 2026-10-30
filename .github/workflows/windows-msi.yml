@@ -11,6 +11,11 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: windows-msi-${{ github.ref }}
+  cancel-in-progress: false
+  queue: max
+
 jobs:
   build:
     runs-on: windows-2025
@@ -41,15 +46,26 @@ jobs:
           $metadata = cargo metadata --no-deps --format-version 1 --locked | ConvertFrom-Json
           if ($LASTEXITCODE -ne 0) { throw 'cargo metadata failed' }
           $version = ($metadata.packages | Where-Object name -eq 'rustclip').version
-          if ($version -notmatch '^\d+\.\d+\.\d+$') { throw "Cargo.toml must contain a stable three-part version: $version" }
+          if (-not ($version -match '^(\d+)\.(\d+)\.(\d+)$')) { throw "Cargo.toml must contain a stable three-part version: $version" }
+          $series = "$($Matches[1]).$($Matches[2])"
+          $minimumPatch = [int]$Matches[3]
+          $patch = $minimumPatch
+          $tags = git tag --list "v$series.*"
+          if ($LASTEXITCODE -ne 0) { throw 'git tag failed' }
+          foreach ($tag in $tags) {
+            if ($tag -match "^v$([regex]::Escape($series))\.(\d+)$") {
+              $patch = [Math]::Max($patch, [int]$Matches[1] + 1)
+            }
+          }
+          $nextVersion = "$series.$patch"
           $buildVersion = switch -Regex ($env:GITHUB_REF) {
-            '^refs/heads/dev$' { "$version-dev.$env:GITHUB_RUN_NUMBER"; break }
-            '^refs/heads/release$' { "$version-rc.$env:GITHUB_RUN_NUMBER"; break }
-            '^refs/heads/main$' { "$version-main.$env:GITHUB_RUN_NUMBER.$env:GITHUB_RUN_ATTEMPT"; break }
+            '^refs/heads/dev$' { "$nextVersion-dev.$env:GITHUB_RUN_NUMBER"; break }
+            '^refs/heads/release$' { "$nextVersion-rc.$env:GITHUB_RUN_NUMBER"; break }
+            '^refs/heads/main$' { $nextVersion; break }
             '^refs/tags/v(.+)$' {
               $tagVersion = $Matches[1]
-              if ($tagVersion -notmatch "^$([regex]::Escape($version))(-(rc\.(0|[1-9]\d*)|main\.[1-9]\d*\.[1-9]\d*))?$") {
-                throw "Tag $env:GITHUB_REF_NAME does not match Cargo.toml version $version"
+              if (-not ($tagVersion -match "^$([regex]::Escape($series))\.(\d+)(-rc\.(0|[1-9]\d*))?$") -or [int]$Matches[1] -lt $minimumPatch) {
+                throw "Tag $env:GITHUB_REF_NAME is below Cargo.toml version $version or belongs to another series"
               }
               $branch = if ($tagVersion -match '-rc\.') { 'release' } else { 'main' }
               git merge-base --is-ancestor $env:GITHUB_SHA "origin/$branch"
@@ -57,7 +73,7 @@ jobs:
               $tagVersion
               break
             }
-            default { "$version-dev.$env:GITHUB_RUN_NUMBER" }
+            default { "$nextVersion-dev.$env:GITHUB_RUN_NUMBER" }
           }
           Add-Content -Path $env:GITHUB_ENV -Value "RUSTCLIP_BUILD_VERSION=$buildVersion"
           Add-Content -Path $env:GITHUB_OUTPUT -Value "version=$buildVersion"
@@ -137,7 +153,7 @@ jobs:
             echo "::notice::Release $tag already exists"
             exit 0
           fi
-          if [[ "$tag" == *-rc.* || "$tag" == *-main.* ]]; then
+          if [[ "$tag" == *-rc.* ]]; then
             options+=(--prerelease --latest=false)
           fi
           gh release create "$tag" package/* \

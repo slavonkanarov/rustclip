@@ -13,14 +13,17 @@ if (-not (Test-Path -LiteralPath "$build/rustclip.exe")) {
 $metadata = cargo metadata --manifest-path "$repo/Cargo.toml" --no-deps --format-version 1 --locked | ConvertFrom-Json
 if ($LASTEXITCODE -ne 0) { throw 'cargo metadata failed' }
 $version = ($metadata.packages | Where-Object name -eq 'rustclip').version
-if ($version -notmatch '^\d+\.\d+\.\d+$') { throw "MSI requires a three-part version: $version" }
+if (-not ($version -match '^(\d+)\.(\d+)\.(\d+)$')) { throw "MSI requires a three-part version: $version" }
+$series = "$($Matches[1]).$($Matches[2])"
+$minimumPatch = [int]$Matches[3]
 $buildVersion = if ($env:RUSTCLIP_BUILD_VERSION) { $env:RUSTCLIP_BUILD_VERSION } else { $version }
-if ($buildVersion -notmatch "^$([regex]::Escape($version))(-((dev|rc)\.(0|[1-9]\d*)|main\.[1-9]\d*\.[1-9]\d*))?$") {
+if (-not ($buildVersion -match "^$([regex]::Escape($series))\.(\d+)(-(dev|rc)\.(0|[1-9]\d*))?$") -or [int]$Matches[1] -lt $minimumPatch) {
     throw "Build version must match Cargo.toml: $buildVersion"
 }
-$parts = $version.Split('.')
+$installerVersion = "$series.$($Matches[1])"
+$parts = $installerVersion.Split('.')
 if ([int]$parts[0] -gt 255 -or [int]$parts[1] -gt 255 -or [int]$parts[2] -gt 65535) {
-    throw "Version exceeds Windows Installer limits: $version"
+    throw "Version exceeds Windows Installer limits: $installerVersion"
 }
 New-Item -ItemType Directory -Force $OutputDir | Out-Null
 $output = (Resolve-Path $OutputDir).Path
@@ -29,7 +32,7 @@ $license = (Get-Content -LiteralPath "$repo/LICENSE" -Raw).
 Set-Content -LiteralPath "$output/LICENSE.rtf" -Encoding ascii -Value "{\rtf1\ansi\deff0{\fonttbl{\f0 Segoe UI;}}\f0\fs18 $license}"
 $msi = "$output/RustClip-$buildVersion-x64.msi"
 & $Wix build -arch x64 -culture en-US -ext WixToolset.UI.wixext/6.0.2 -ext WixToolset.Util.wixext/6.0.2 `
-    -d "ProductVersion=$version" -d "BuildDir=$build" -d "RepoDir=$repo" `
+    -d "ProductVersion=$installerVersion" -d "BuildDir=$build" -d "RepoDir=$repo" `
     -d "LicenseRtf=$output/LICENSE.rtf" -o $msi "$repo/installer/RustClip.wxs"
 if ($LASTEXITCODE -ne 0) { throw 'WiX build failed' }
 & $Wix msi validate $msi
