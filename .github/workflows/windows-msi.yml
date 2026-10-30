@@ -2,7 +2,10 @@ name: Windows MSI
 
 on:
   push:
+    branches: [dev, release, main]
+    tags: ['v*']
   pull_request:
+    branches: [dev, release, main]
   workflow_dispatch:
 
 permissions:
@@ -18,6 +21,8 @@ jobs:
     steps:
       - name: Check out sources
         uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
 
       - name: Set up Rust
         run: |
@@ -27,6 +32,31 @@ jobs:
 
       - name: Check formatting
         run: cargo fmt --all -- --check
+
+      - name: Set build version
+        run: |
+          $metadata = cargo metadata --no-deps --format-version 1 --locked | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0) { throw 'cargo metadata failed' }
+          $version = ($metadata.packages | Where-Object name -eq 'rustclip').version
+          if ($version -notmatch '^\d+\.\d+\.\d+$') { throw "Cargo.toml must contain a stable three-part version: $version" }
+          $buildVersion = switch -Regex ($env:GITHUB_REF) {
+            '^refs/heads/dev$' { "$version-dev.$env:GITHUB_RUN_NUMBER"; break }
+            '^refs/heads/release$' { "$version-rc.$env:GITHUB_RUN_NUMBER"; break }
+            '^refs/heads/main$' { $version; break }
+            '^refs/tags/v(.+)$' {
+              $tagVersion = $Matches[1]
+              if ($tagVersion -notmatch "^$([regex]::Escape($version))(-rc\.(0|[1-9]\d*))?$") {
+                throw "Tag $env:GITHUB_REF_NAME does not match Cargo.toml version $version"
+              }
+              $branch = if ($tagVersion -match '-rc\.') { 'release' } else { 'main' }
+              git merge-base --is-ancestor $env:GITHUB_SHA "origin/$branch"
+              if ($LASTEXITCODE -ne 0) { throw "Tag $env:GITHUB_REF_NAME must point to a commit on $branch" }
+              $tagVersion
+              break
+            }
+            default { "$version-dev.$env:GITHUB_RUN_NUMBER" }
+          }
+          Add-Content -Path $env:GITHUB_ENV -Value "RUSTCLIP_BUILD_VERSION=$buildVersion"
 
       - name: Run Rust tests
         run: cargo test --locked --target x86_64-pc-windows-msvc
@@ -76,7 +106,7 @@ jobs:
           if-no-files-found: ignore
 
   release:
-    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     needs: build
     runs-on: ubuntu-latest
     permissions:
@@ -88,13 +118,14 @@ jobs:
           name: rustclip-windows-x64
           path: package
 
-      - name: Publish main build to Releases
+      - name: Publish versioned release
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
-          gh release create "main-${GITHUB_RUN_NUMBER}-${GITHUB_RUN_ATTEMPT}" package/* \
-            --target "$GITHUB_SHA" \
-            --title "RustClip main build #${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT}" \
-            --notes "Automated Windows x64 build from main at $GITHUB_SHA. Download the MSI to install, or the ZIP to run without installation." \
-            --prerelease --latest=false
+          options=()
+          if [[ "$GITHUB_REF_NAME" == *-rc.* ]]; then
+            options=(--prerelease --latest=false)
+          fi
+          gh release create "$GITHUB_REF_NAME" package/* \
+            --verify-tag --title "RustClip ${GITHUB_REF_NAME#v}" --generate-notes "${options[@]}"
