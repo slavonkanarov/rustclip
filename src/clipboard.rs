@@ -119,7 +119,7 @@ fn lock(hwnd: HWND) -> Result<ClipboardLock, String> {
         }
         thread::sleep(Duration::from_millis(10));
     }
-    Err("Буфер обмена занят другим приложением".into())
+    Err("Clipboard is busy in another application".into())
 }
 fn registered(name: &str) -> u32 {
     unsafe { RegisterClipboardFormatW(wide(name).as_ptr()) }
@@ -263,7 +263,7 @@ fn capture(hwnd: HWND, settings: &Settings, allow_own: bool) -> Result<Option<Cl
         if let Some(bytes) = read_bytes(id) {
             total += bytes.len();
             if total > 64 * 1024 * 1024 {
-                return Err("Клип превышает лимит 64 MiB".into());
+                return Err("Clip exceeds the 64 MiB limit".into());
             }
             if id == 13 {
                 if bytes.len() > settings.max_text_kb.saturating_mul(1024) {
@@ -337,7 +337,7 @@ fn publish(hwnd: HWND, clip: &Clip, plain: bool) -> Result<u32, String> {
     let plain_clip;
     let formats = if plain {
         if clip.text.is_empty() {
-            return Err("Нет текстового представления".into());
+            return Err("No text representation".into());
         }
         plain_clip = text_clip(clip.text.clone());
         &plain_clip.formats
@@ -345,12 +345,12 @@ fn publish(hwnd: HWND, clip: &Clip, plain: bool) -> Result<u32, String> {
         &clip.formats
     };
     if formats.is_empty() {
-        return Err("Клип пуст".into());
+        return Err("Clip is empty".into());
     }
     let guard = lock(hwnd)?;
     unsafe {
         if EmptyClipboard() == 0 {
-            return Err("Не удалось очистить Clipboard для записи".into());
+            return Err("Could not clear the clipboard for writing".into());
         }
         for (name, bytes) in formats
             .iter()
@@ -359,7 +359,7 @@ fn publish(hwnd: HWND, clip: &Clip, plain: bool) -> Result<u32, String> {
             let id = name.parse().unwrap_or_else(|_| registered(name));
             let handle = GlobalAlloc(GMEM_MOVEABLE, bytes.len());
             if handle.is_null() {
-                return Err("Недостаточно памяти".into());
+                return Err("Not enough memory".into());
             }
             let ptr = GlobalLock(handle);
             if ptr.is_null() {
@@ -370,7 +370,7 @@ fn publish(hwnd: HWND, clip: &Clip, plain: bool) -> Result<u32, String> {
             GlobalUnlock(handle);
             if SetClipboardData(id, handle).is_null() {
                 GlobalFree(handle);
-                return Err(format!("Не удалось записать формат {name}"));
+                return Err(format!("Failed to write format {name}"));
             }
         }
         drop(guard);
@@ -402,7 +402,7 @@ fn hotkey_held(key: u32, modifiers: u32) -> bool {
 fn paste(target: HWND, ctrl_v: bool) -> Result<(), String> {
     unsafe {
         if target.is_null() || IsWindow(target) == 0 {
-            return Err("Не удалось вернуть фокус целевому окну".into());
+            return Err("Could not restore focus to the target window".into());
         }
         if GetForegroundWindow() != target {
             let current_thread = GetCurrentThreadId();
@@ -415,7 +415,7 @@ fn paste(target: HWND, ctrl_v: bool) -> Result<(), String> {
                 AttachThreadInput(current_thread, foreground_thread, 0);
             }
             if !focused {
-                return Err("Не удалось вернуть фокус целевому окну".into());
+                return Err("Could not restore focus to the target window".into());
             }
         }
         for _ in 0..20 {
@@ -425,14 +425,14 @@ fn paste(target: HWND, ctrl_v: bool) -> Result<(), String> {
             thread::sleep(Duration::from_millis(10));
         }
         if GetForegroundWindow() != target {
-            return Err("Целевое окно не получило фокус для вставки".into());
+            return Err("The target window did not gain focus for pasting".into());
         }
         let deadline = Instant::now() + Duration::from_secs(2);
         while !released() && Instant::now() < deadline {
             thread::sleep(Duration::from_millis(10));
         }
         if !released() {
-            return Err("Модификаторы не отпущены для вставки".into());
+            return Err("Modifier keys were not released for pasting".into());
         }
         let (modifier, key) = if ctrl_v {
             (VK_CONTROL, 0x56)
@@ -460,7 +460,7 @@ fn paste(target: HWND, ctrl_v: bool) -> Result<(), String> {
         .collect();
         if SendInput(4, inputs.as_ptr(), std::mem::size_of::<INPUT>() as i32) != 4 {
             return Err(
-                "SendInput: вставка заблокирована (возможно, права приложения выше)".into(),
+                "SendInput: paste blocked (the application may have higher privileges)".into(),
             );
         }
     }
@@ -513,12 +513,12 @@ pub fn start(
         for (a, b) in tray
             .szTip
             .iter_mut()
-            .zip(wide("RustClip — история буфера обмена"))
+            .zip(wide(settings.language.text("RustClip — clipboard history")))
         {
             *a = b;
         }
         if Shell_NotifyIconW(NIM_ADD, &tray) == 0 {
-            let _ = tx.send(Event::Error("Не удалось создать значок в трее".into()));
+            let _ = tx.send(Event::Error("Could not create the tray icon".into()));
             ctx.request_repaint();
         } else {
             tray.Anonymous.uVersion = NOTIFYICON_VERSION_4;
@@ -610,13 +610,23 @@ pub fn start(
                     }
                     if action == WM_RBUTTONUP || action == WM_CONTEXTMENU {
                         let menu = CreatePopupMenu();
-                        AppendMenuW(menu, MF_STRING, 1, wide("Открыть").as_ptr());
-                        AppendMenuW(menu, MF_STRING, 2, wide("Выход").as_ptr());
+                        AppendMenuW(
+                            menu,
+                            MF_STRING,
+                            1,
+                            wide(settings.language.text("Open")).as_ptr(),
+                        );
+                        AppendMenuW(
+                            menu,
+                            MF_STRING,
+                            2,
+                            wide(settings.language.text("Exit")).as_ptr(),
+                        );
                         let mut p = POINT::default();
                         GetCursorPos(&mut p);
                         if SetForegroundWindow(hwnd) == 0 {
                             let _ =
-                                tx.send(Event::Error("Не удалось активировать меню трея".into()));
+                                tx.send(Event::Error("Could not activate the tray menu".into()));
                         }
                         let choice = TrackPopupMenu(
                             menu,
@@ -654,6 +664,17 @@ pub fn start(
                     Command::Quit => break 'run,
                     Command::Settings(s) => {
                         repeat = None;
+                        if settings.language != s.language {
+                            tray.szTip.fill(0);
+                            for (a, b) in tray
+                                .szTip
+                                .iter_mut()
+                                .zip(wide(s.language.text("RustClip — clipboard history")))
+                            {
+                                *a = b;
+                            }
+                            Shell_NotifyIconW(NIM_MODIFY, &tray);
+                        }
                         if !demo && hotkeys::validate(&s).is_ok() {
                             for (id, active) in registered.iter_mut().enumerate() {
                                 if *active {
@@ -670,7 +691,13 @@ pub fn start(
                         if let Err(e) = publish(hwnd, &clip, plain) {
                             let _ = tx.send(Event::Error(e));
                         }
-                        preview.show(&clip, target, settings.preview_ms, number);
+                        preview.show(
+                            &clip,
+                            target,
+                            settings.preview_ms,
+                            number,
+                            settings.language,
+                        );
                     }
                     Command::Secret(clip, should_paste, index) => {
                         if should_paste {
@@ -695,7 +722,13 @@ pub fn start(
                         } else {
                             None
                         };
-                        preview.show(&clip, paste_target, settings.preview_ms, number);
+                        preview.show(
+                            &clip,
+                            paste_target,
+                            settings.preview_ms,
+                            number,
+                            settings.language,
+                        );
                         pending = Some((clip, plain, old, paste_target, false));
                     }
                 }
@@ -803,7 +836,7 @@ unsafe fn register_hotkeys(
             registered[id as usize - 1] = true;
         } else {
             let _ = tx.send(Event::Error(format!(
-                "Горячая клавиша {value} занята другой программой"
+                "Hotkey {value} is in use by another program"
             )));
         }
     }

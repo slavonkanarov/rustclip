@@ -122,13 +122,13 @@ mod tests {
 
 pub(super) fn clip_kind(clip: &Clip) -> &'static str {
     if clip.formats.iter().any(|(format, _)| format == "15") {
-        "Файлы"
+        "Files"
     } else if !clip.png.is_empty() {
-        "Изображение"
+        "Image"
     } else if !clip.text.is_empty() {
-        "Текст"
+        "Text"
     } else {
-        "Данные"
+        "Data"
     }
 }
 
@@ -138,7 +138,7 @@ pub(super) fn clip_icon(ui: &mut egui::Ui, kind: &str) {
     let stroke = egui::Stroke::new(1.5, egui::Color32::from_rgb(134, 193, 221));
     let paper = egui::Rect::from_min_size(rect.min + egui::vec2(4., 2.), egui::vec2(16., 20.));
     match kind {
-        "Изображение" => {
+        "Image" => {
             painter.rect_stroke(paper, 3., stroke, egui::StrokeKind::Inside);
             painter.circle_filled(paper.min + egui::vec2(11., 6.), 1.5, stroke.color);
             painter.line_segment(
@@ -156,7 +156,7 @@ pub(super) fn clip_icon(ui: &mut egui::Ui, kind: &str) {
                 stroke,
             );
         }
-        "Файлы" => {
+        "Files" => {
             painter.rect_stroke(
                 paper.translate(egui::vec2(-3., -2.)),
                 2.,
@@ -180,7 +180,7 @@ pub(super) fn clip_icon(ui: &mut egui::Ui, kind: &str) {
                 stroke,
             );
         }
-        "Текст" => {
+        "Text" => {
             painter.rect_stroke(paper, 2., stroke, egui::StrokeKind::Inside);
             for y in [6., 10., 14.] {
                 painter.line_segment(
@@ -407,6 +407,7 @@ fn app_icon(ui: &mut egui::Ui, path: &str, icons: &mut HashMap<String, egui::Tex
 
 pub(super) fn app_list(
     ui: &mut egui::Ui,
+    language: crate::i18n::Language,
     title: &str,
     entries: &mut String,
     adding: &mut Option<String>,
@@ -430,7 +431,7 @@ pub(super) fn app_list(
             changed |= ui
                 .add(egui::TextEdit::singleline(row).desired_width(230.))
                 .changed();
-            if ui.small_button("Удалить").clicked() {
+            if ui.small_button(language.text("Delete")).clicked() {
                 remove = Some(index);
             }
         });
@@ -442,7 +443,7 @@ pub(super) fn app_list(
     if changed {
         *entries = rows.join("\n");
     }
-    if adding.is_none() && ui.button("+ Добавить приложение").clicked() {
+    if adding.is_none() && ui.button(language.text("+ Add application")).clicked() {
         *adding = Some(String::new());
     }
     let mut close = false;
@@ -450,10 +451,10 @@ pub(super) fn app_list(
         ui.horizontal(|ui| {
             let response = ui.add(
                 egui::TextEdit::singleline(value)
-                    .hint_text("Имя.exe или полный путь")
+                    .hint_text(language.text("Name.exe or full path"))
                     .desired_width(230.),
             );
-            if (ui.button("Добавить").clicked()
+            if (ui.button(language.text("Add")).clicked()
                 || (response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter))))
                 && !value.trim().is_empty()
             {
@@ -468,12 +469,12 @@ pub(super) fn app_list(
                     entries.push_str(name);
                 }
                 close = true;
-            } else if ui.button("Отмена").clicked() {
+            } else if ui.button(language.text("Cancel")).clicked() {
                 close = true;
             }
         });
         if !close {
-            ui.label("Последние активные приложения:");
+            ui.label(language.text("Recently active applications:"));
             for path in recent.iter().take(5) {
                 ui.horizontal(|ui| {
                     app_icon(ui, path, icons);
@@ -491,21 +492,22 @@ pub(super) fn app_list(
 }
 pub(super) fn secret_app_picker(
     ui: &mut egui::Ui,
+    language: crate::i18n::Language,
     app: &mut String,
     recent: &[String],
     icons: &mut HashMap<String, egui::TextureHandle>,
 ) {
     ui.horizontal(|ui| {
         ui.label(if app.is_empty() {
-            "Приложение: не выбрано"
+            language.text("Application: none selected")
         } else {
             app.as_str()
         });
-        ui.menu_button("Выбрать приложение…", |ui| {
-            ui.label("Имя.exe или полный путь");
+        ui.menu_button(language.text("Choose application…"), |ui| {
+            ui.label(language.text("Name.exe or full path"));
             ui.text_edit_singleline(app);
             ui.separator();
-            ui.label("Последние 5 приложений");
+            ui.label(language.text("Last 5 applications"));
             for path in recent.iter().take(5) {
                 ui.horizontal(|ui| {
                     app_icon(ui, path, icons);
@@ -520,7 +522,7 @@ pub(super) fn secret_app_picker(
         if !app.is_empty()
             && ui
                 .small_button("×")
-                .on_hover_text("Убрать привязку")
+                .on_hover_text(language.text("Remove association"))
                 .clicked()
         {
             app.clear();

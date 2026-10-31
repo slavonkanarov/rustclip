@@ -33,10 +33,17 @@ impl Preview {
             deadline: None,
         }
     }
-    pub(super) fn show(&mut self, clip: &Clip, target: HWND, timeout: u64, number: Option<usize>) {
+    pub(super) fn show(
+        &mut self,
+        clip: &Clip,
+        target: HWND,
+        timeout: u64,
+        number: Option<usize>,
+        language: crate::i18n::Language,
+    ) {
         self.number = number;
         self.text = if clip.text.is_empty() {
-            clip.title()
+            clip.title(language)
         } else {
             clip.text.chars().take(1800).collect()
         };

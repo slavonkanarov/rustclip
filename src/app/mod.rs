@@ -96,12 +96,22 @@ impl App {
                 .insert(egui::TextStyle::Heading, egui::FontId::proportional(24.));
         });
         let (mut clips, mut settings, errors) = model::load();
+        cc.egui_ctx.send_viewport_cmd(egui::ViewportCommand::Title(
+            settings
+                .language
+                .text("RustClip (Clipboard history)")
+                .into(),
+        ));
         if std::env::args().any(|s| s == "--demo") {
             settings.monitor = false;
             settings.auto_paste = false;
             if clips.is_empty() {
                 clips.push(clipboard::text_clip(
-                    "Добро пожаловать в RustClip!\nИстория, поиск, секреты и центральное превью."
+                    settings
+                        .language
+                        .text(
+                            "Welcome to RustClip!\nHistory, search, secrets, and central preview.",
+                        )
                         .into(),
                 ));
             }
@@ -161,7 +171,7 @@ impl App {
     }
     fn send(&mut self, command: Command) {
         if self.tx.send(command).is_err() {
-            self.status = "Clipboard worker остановлен".into();
+            self.status = "Clipboard worker stopped".into();
         }
     }
     fn persist(&mut self, index: usize) {
@@ -206,7 +216,7 @@ impl App {
     }
     fn remove(&mut self, index: usize) -> bool {
         if self.clips[index].starred {
-            self.status = "Сначала снимите звёздочку".into();
+            self.status = "Remove the star first".into();
             return false;
         }
         let path = model::directory()

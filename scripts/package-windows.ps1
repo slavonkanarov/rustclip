@@ -38,8 +38,10 @@ if ($LASTEXITCODE -ne 0) { throw 'WiX build failed' }
 & $Wix msi validate $msi
 if ($LASTEXITCODE -ne 0) { throw 'MSI validation failed' }
 Copy-Item -LiteralPath "$build/rustclip.exe", "$repo/LICENSE", "$repo/README.md" -Destination $output
+New-Item -ItemType Directory -Force "$output/docs" | Out-Null
+Copy-Item -LiteralPath "$repo/docs/README.ru.md" -Destination "$output/docs"
 $zip = "$output/RustClip-$buildVersion-windows-x64.zip"
-Compress-Archive -LiteralPath "$output/rustclip.exe", "$output/LICENSE", "$output/README.md" -DestinationPath $zip -Force
+Compress-Archive -LiteralPath "$output/rustclip.exe", "$output/LICENSE", "$output/README.md", "$output/docs" -DestinationPath $zip -Force
 Get-FileHash -Algorithm SHA256 -LiteralPath $msi, $zip, "$output/rustclip.exe" |
     ForEach-Object { '{0}  {1}' -f $_.Hash.ToLowerInvariant(), (Split-Path $_.Path -Leaf) } |
     Set-Content -LiteralPath "$output/SHA256SUMS.txt" -Encoding ascii

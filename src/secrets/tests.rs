@@ -125,6 +125,6 @@ fn old_secret_list_opens_without_folders() {
     assert!(vault[0].hidden);
     assert!(vault.folders.is_empty());
     assert!(vault.place_unfiled());
-    assert_eq!(vault[0].folder, "Импортированные");
+    assert_eq!(vault[0].folder, "Imported");
     assert_eq!(vault.folders.len(), 1);
 }

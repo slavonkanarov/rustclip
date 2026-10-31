@@ -26,7 +26,7 @@ function Update-UserInstallation {
     if ((Get-ItemProperty -LiteralPath $runKey -Name RustClip -ErrorAction SilentlyContinue).RustClip) {
         Set-ItemProperty -LiteralPath $runKey -Name RustClip -Value "`"$executable`""
     }
-    foreach ($name in @('rustclip.exe', 'icon.ico', 'LICENSE', 'README.md')) {
+    foreach ($name in @('rustclip.exe', 'icon.ico', 'LICENSE', 'README.md', 'README.ru.md')) {
         $path = Join-Path $oldInstallDir $name
         if (Test-Path -LiteralPath $path -PathType Leaf) { Remove-Item -LiteralPath $path -Force }
     }
@@ -94,6 +94,8 @@ try {
     New-Item -ItemType Directory -Force $installDir, $shortcutDir | Out-Null
     Copy-Item -LiteralPath $build, "$repo\assets\icon.ico", "$repo\LICENSE", "$repo\README.md" `
         -Destination $installDir -Force
+    New-Item -ItemType Directory -Force (Join-Path $installDir 'docs') | Out-Null
+    Copy-Item -LiteralPath "$repo\docs\README.ru.md" -Destination (Join-Path $installDir 'docs') -Force
     if ((Get-FileHash -Algorithm SHA256 -LiteralPath $build).Hash -ne
         (Get-FileHash -Algorithm SHA256 -LiteralPath $executable).Hash) {
         throw 'Installed rustclip.exe does not match the current build'

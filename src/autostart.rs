@@ -32,7 +32,7 @@ pub fn set_enabled(enabled: bool) -> Result<(), String> {
     };
     if result != ERROR_SUCCESS {
         return Err(format!(
-            "Автозапуск: {}",
+            "Autostart: {}",
             io::Error::from_raw_os_error(result as i32)
         ));
     }
@@ -56,7 +56,7 @@ pub fn set_enabled(enabled: bool) -> Result<(), String> {
         Ok(())
     } else {
         Err(format!(
-            "Автозапуск: {}",
+            "Autostart: {}",
             io::Error::from_raw_os_error(result as i32)
         ))
     }

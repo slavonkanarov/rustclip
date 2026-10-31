@@ -10,30 +10,35 @@ use zeroize::Zeroize;
 mod tests;
 
 const SETTINGS_PAGES: [&str; 7] = [
-    "Общее",
-    "Горячие клавиши",
-    "История",
-    "Вставка",
-    "Дополнительно",
-    "Фильтрация",
-    "Секреты",
+    "General",
+    "Hotkeys",
+    "History",
+    "Pasting",
+    "Advanced",
+    "Filtering",
+    "Secrets",
 ];
 const SETTINGS_HINTS: [&str; 7] = [
-    "Сбор клипов и поведение окна приложения.",
-    "Быстрый доступ к истории и вставке из любого приложения.",
-    "Порядок, объём хранения и повторяющиеся клипы.",
-    "Поведение буфера обмена при вставке в другие приложения.",
-    "Центральное превью и ограничения размера текста.",
-    "Выберите приложения и форматы, которые нужно пропускать.",
-    "Защита и доступ к зашифрованному хранилищу.",
+    "Clip capture and window behavior.",
+    "Quick access to history and pasting from any application.",
+    "Order, storage size, and duplicate clips.",
+    "Clipboard behavior when pasting into other applications.",
+    "Central preview and text size limits.",
+    "Choose applications and formats to skip.",
+    "Protection and access to the encrypted vault.",
 ];
 
-fn settings_navigation(ui: &mut egui::Ui, page: &mut usize, focus: bool) {
+fn settings_navigation(
+    ui: &mut egui::Ui,
+    page: &mut usize,
+    focus: bool,
+    language: crate::i18n::Language,
+) {
     let mut enter_content = None;
     for (i, name) in SETTINGS_PAGES.iter().enumerate() {
         let response = ui.add_sized(
             [ui.available_width(), 38.],
-            egui::Button::new(*name).selected(*page == i),
+            egui::Button::new(language.text(name)).selected(*page == i),
         );
         if focus && *page == i {
             response.request_focus();
@@ -56,7 +61,7 @@ fn settings_navigation(ui: &mut egui::Ui, page: &mut usize, focus: bool) {
 }
 
 impl App {
-    fn save_preferences(&mut self) -> Result<(), String> {
+    fn save_preferences(&mut self, ctx: &egui::Context) -> Result<(), String> {
         hotkeys::validate(&self.draft)?;
         self.draft.recent_apps = self.settings.recent_apps.clone();
         if self.draft.autostart != self.settings.autostart {
@@ -72,6 +77,15 @@ impl App {
             return Err(error);
         }
         self.settings = self.draft.clone();
+        ctx.send_viewport_cmd_to(
+            egui::ViewportId::ROOT,
+            egui::ViewportCommand::Title(
+                self.settings
+                    .language
+                    .text("RustClip (Clipboard history)")
+                    .into(),
+            ),
+        );
         self.send(Command::Settings(self.settings.clone()));
         self.settings_open = false;
         Ok(())
@@ -100,12 +114,13 @@ impl App {
             self.credential_confirm.zeroize();
             return;
         }
+        let language = self.draft.language;
         let focus_settings = self.focus_settings == 1;
         self.focus_settings = self.focus_settings.saturating_sub(1);
         ctx.show_viewport_immediate(
             egui::ViewportId::from_hash_of("rustclip-settings"),
             egui::ViewportBuilder::default()
-                .with_title("Настройки — RustClip")
+                .with_title(language.text("Settings — RustClip"))
                 .with_inner_size([920., 660.])
                 .with_min_inner_size([760., 500.]),
             |ui, _| {
@@ -132,46 +147,55 @@ impl App {
             let mut cancel = false;
             egui::Panel::bottom("settings_actions").exact_size(68.).frame(egui::Frame::NONE.fill(SURFACE).inner_margin(egui::Margin::symmetric(20, 16))).show(ui, |ui| {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.add(egui::Button::new("Сохранить").fill(ACCENT)).clicked() {
-                        if let Err(error) = self.save_preferences() {
+                    if ui.add(egui::Button::new(language.text("Save")).fill(ACCENT)).clicked() {
+                        if let Err(error) = self.save_preferences(ui.ctx()) {
                             self.status = error;
                         }
                     }
-                    if ui.button("Отмена").clicked(){cancel=true;}
-                    if self.draft != self.settings { ui.colored_label(MUTED, "Есть несохранённые изменения"); }
+                    if ui.button(language.text("Cancel")).clicked(){cancel=true;}
+                    if self.draft != self.settings { ui.colored_label(MUTED, language.text("Unsaved changes")); }
                 });
             });
             egui::Panel::left("settings_navigation").exact_size(210.).resizable(false)
                 .frame(egui::Frame::NONE.fill(SURFACE).inner_margin(18)).show(ui, |ui| {
-                    ui.heading("Настройки");
+                    ui.heading(language.text("Settings"));
                     ui.colored_label(MUTED, "RustClip");
                     ui.add_space(22.);
                     settings_navigation(ui, &mut self.settings_page,
-                        focus_settings && self.hotkey_recorder.is_none() && !self.confirm_discard);
+                        focus_settings && self.hotkey_recorder.is_none() && !self.confirm_discard, language);
                 });
             egui::CentralPanel::default().frame(egui::Frame::NONE.inner_margin(26)).show(ui, |ui| {
-                ui.heading(SETTINGS_PAGES[self.settings_page]);
-                ui.colored_label(MUTED, SETTINGS_HINTS[self.settings_page]);
+                ui.heading(language.text(SETTINGS_PAGES[self.settings_page]));
+                ui.colored_label(MUTED, language.text(SETTINGS_HINTS[self.settings_page]));
                 ui.add_space(16.);
-                if !self.status.is_empty() { ui.colored_label(egui::Color32::LIGHT_RED, &self.status); }
+                if !self.status.is_empty() { ui.colored_label(egui::Color32::LIGHT_RED, language.message(&self.status)); }
                 egui::ScrollArea::vertical().id_salt(("settings_content", self.settings_page)).show(ui, |ui| {
                 ui.set_width(ui.available_width());
                 egui::Frame::NONE.fill(SURFACE).corner_radius(10).inner_margin(18).show(ui, |ui| {
                 ui.set_width(ui.available_width());
                 match self.settings_page {
-                    0=>{ui.checkbox(&mut self.draft.autostart,"Запускать при входе в Windows");ui.checkbox(&mut self.draft.monitor,"Следить за буфером обмена");ui.checkbox(&mut self.draft.hide_after,"Спрятаться после копирования/вставки");ui.label("Закрытие окна сворачивает RustClip в трей.");ui.label(format!("Данные: {}",model::directory().display()));},
+                    0=>{
+                        ui.label(language.text("Interface language"));
+                        egui::ComboBox::from_id_salt("interface_language")
+                            .selected_text(self.draft.language.name())
+                            .show_ui(ui, |ui| {
+                                for option in crate::i18n::Language::ALL {
+                                    ui.selectable_value(&mut self.draft.language, option, option.name());
+                                }
+                            });
+                        ui.checkbox(&mut self.draft.autostart,language.text("Start when Windows starts"));ui.checkbox(&mut self.draft.monitor,language.text("Monitor clipboard"));ui.checkbox(&mut self.draft.hide_after,language.text("Hide after copying or pasting"));ui.label(language.text("Closing the window minimizes RustClip to the tray."));ui.label(format!("{} {}", language.text("Data:"), model::directory().display()));},
                     1=>{
-                        ui.label("Глобальные сочетания (Ctrl, Shift, Alt, Win + клавиша):");
+                        ui.label(language.text("Global shortcuts (Ctrl, Shift, Alt, Win + key):"));
                         egui::Grid::new("hotkey_grid").num_columns(3).show(ui, |ui| {
                             for (index, (name, value)) in [
-                                ("Открыть историю", &mut self.draft.hotkey_open),
-                                ("Предыдущий клип", &mut self.draft.hotkey_previous),
-                                ("Следующий клип", &mut self.draft.hotkey_next),
-                                ("Вставить как текст", &mut self.draft.hotkey_plain_paste),
+                                (language.text("Open history"), &mut self.draft.hotkey_open),
+                                (language.text("Previous clip"), &mut self.draft.hotkey_previous),
+                                (language.text("Next clip"), &mut self.draft.hotkey_next),
+                                (language.text("Paste as text"), &mut self.draft.hotkey_plain_paste),
                             ].into_iter().enumerate() {
                                 ui.label(name);
                                 ui.label(value.as_str());
-                                if ui.button("…").on_hover_text("Записать сочетание клавиш").clicked() {
+                                if ui.button("…").on_hover_text(language.text("Record shortcut")).clicked() {
                                     match hotkeys::Recorder::new(ui.ctx()) {
                                         Ok(recorder) => self.hotkey_recorder = Some((index, recorder)),
                                         Err(error) => self.status = error,
@@ -180,24 +204,24 @@ impl App {
                                 ui.end_row();
                             }
                         });
-                        ui.label("Нажмите «…», чтобы записать сочетание. Изменения применяются после сохранения настроек.");
+                        ui.label(language.text("Click “…” to record a shortcut. Changes take effect after saving settings."));
                         if let Err(error) = hotkeys::validate(&self.draft) {
-                            ui.colored_label(egui::Color32::RED, error);
+                            ui.colored_label(egui::Color32::RED, language.message(&error));
                         }
-                        ui.checkbox(&mut self.draft.auto_paste,"Автоматически вставлять после Quick Copy");
+                        ui.checkbox(&mut self.draft.auto_paste,language.text("Paste automatically after Quick Copy"));
                     },
-                    2=>{ui.label("Максимальное количество незакреплённых клипов");ui.add(egui::DragValue::new(&mut self.draft.limit).speed(1.).range(1..=usize::MAX));ui.label("Проверять последние клипы на дубликаты");ui.add(egui::DragValue::new(&mut self.draft.duplicates).speed(1.).range(0..=100));ui.checkbox(&mut self.draft.newest_first,"Новые клипы сверху");},
-                    3=>{ui.checkbox(&mut self.draft.ctrl_v,"Эмулировать Ctrl+V (иначе Shift+Insert)");ui.checkbox(&mut self.draft.restore,"Восстанавливать Clipboard после вставки");ui.label("Задержка совместимости, мс");ui.add(egui::DragValue::new(&mut self.draft.paste_delay).speed(1.).range(20..=2000));},
-                    4=>{ui.label("Таймер центрального превью, мс (0 — без таймера)");ui.add(egui::DragValue::new(&mut self.draft.preview_ms).speed(1.).range(0..=60000));ui.label("Максимальный текст, KiB");ui.add(egui::DragValue::new(&mut self.draft.max_text_kb).speed(1.).range(1..=32768));ui.label("Esc скрывает центральное превью.");},
+                    2=>{ui.label(language.text("Maximum number of unstarred clips"));ui.add(egui::DragValue::new(&mut self.draft.limit).speed(1.).range(1..=usize::MAX));ui.label(language.text("Check recent clips for duplicates"));ui.add(egui::DragValue::new(&mut self.draft.duplicates).speed(1.).range(0..=100));ui.checkbox(&mut self.draft.newest_first,language.text("Newest clips first"));},
+                    3=>{ui.checkbox(&mut self.draft.ctrl_v,language.text("Emulate Ctrl+V (otherwise Shift+Insert)"));ui.checkbox(&mut self.draft.restore,language.text("Restore clipboard after pasting"));ui.label(language.text("Compatibility delay, ms"));ui.add(egui::DragValue::new(&mut self.draft.paste_delay).speed(1.).range(20..=2000));},
+                    4=>{ui.label(language.text("Central preview timeout, ms (0 = no timeout)"));ui.add(egui::DragValue::new(&mut self.draft.preview_ms).speed(1.).range(0..=60000));ui.label(language.text("Maximum text size, KiB"));ui.add(egui::DragValue::new(&mut self.draft.max_text_kb).speed(1.).range(1..=32768));ui.label(language.text("Esc hides the central preview."));},
                     5=>{
-                        ui.label("Имя приложения (с .exe или без) или полный путь.");
-                        app_list(ui, "Не захватывать из приложений:", &mut self.draft.excluded_capture, &mut self.adding_capture, &self.settings.recent_apps, &mut self.app_icons);
+                        ui.label(language.text("Application name (with or without .exe) or full path."));
+                        app_list(ui, language, language.text("Do not capture from applications:"), &mut self.draft.excluded_capture, &mut self.adding_capture, &self.settings.recent_apps, &mut self.app_icons);
                         ui.separator();
-                        app_list(ui, "Игнорировать горячие клавиши в приложениях:", &mut self.draft.excluded_hotkeys, &mut self.adding_hotkeys, &self.settings.recent_apps, &mut self.app_icons);
+                        app_list(ui, language, language.text("Ignore hotkeys in applications:"), &mut self.draft.excluded_hotkeys, &mut self.adding_hotkeys, &self.settings.recent_apps, &mut self.app_icons);
                         ui.separator();
-                        ui.label("Дополнительные исключённые имена/ID форматов:");
+                        ui.label(language.text("Additional excluded format names/IDs:"));
                         ui.text_edit_multiline(&mut self.draft.excluded_formats);
-                        ui.label("Базовый список проблемных форматов встроен; читаются только поддерживаемые форматы.");
+                        ui.label(language.text("Common problematic formats are excluded by default; only supported formats are read."));
                     }
                     _=>self.setup_secrets_ui(ui),
                 } });
@@ -214,15 +238,15 @@ impl App {
             self.record_hotkey(ui.ctx());
             if self.confirm_discard {
                 egui::Modal::new(egui::Id::new("discard_settings")).show(ui.ctx(), |ui| {
-                    ui.heading("Закрыть настройки?");
-                    ui.label("Несохранённые изменения будут сброшены.");
+                    ui.heading(language.text("Close settings?"));
+                    ui.label(language.text("Unsaved changes will be discarded."));
                     ui.horizontal(|ui| {
-                        if ui.button("Сбросить и закрыть").clicked() {
+                        if ui.button(language.text("Discard and close")).clicked() {
                             self.draft = self.settings.clone();
                             self.settings_open = false;
                             self.confirm_discard = false;
                         }
-                        if ui.button("Продолжить редактирование").clicked() {
+                        if ui.button(language.text("Keep editing")).clicked() {
                             self.confirm_discard = false;
                         }
                     });
@@ -236,6 +260,7 @@ impl App {
     }
 
     fn record_hotkey(&mut self, ctx: &egui::Context) {
+        let language = self.draft.language;
         let Some((index, recorder)) = &mut self.hotkey_recorder else {
             return;
         };
@@ -255,12 +280,12 @@ impl App {
         let mut close = false;
         egui::Modal::new(egui::Id::new("record_hotkey")).show(ctx, |ui| {
             ui.set_min_width(380.);
-            ui.heading("Запись горячей клавиши");
-            ui.label("Нажмите сочетание с Ctrl, Shift, Alt или Win.");
+            ui.heading(language.text("Record hotkey"));
+            ui.label(language.text("Press a shortcut with Ctrl, Shift, Alt, or Win."));
             ui.add_space(12.);
             ui.horizontal_wrapped(|ui| {
                 if value.is_empty() {
-                    ui.label("Ожидание нажатия…");
+                    ui.label(language.text("Waiting for keys…"));
                 } else {
                     for (index, key) in value.split('+').enumerate() {
                         if index > 0 {
@@ -276,17 +301,17 @@ impl App {
             if !value.is_empty()
                 && let Err(error) = &validation
             {
-                ui.colored_label(egui::Color32::LIGHT_RED, error);
+                ui.colored_label(egui::Color32::LIGHT_RED, language.message(error));
             }
             ui.add_space(12.);
             ui.horizontal(|ui| {
-                if ui.button("Отмена").clicked() {
+                if ui.button(language.text("Cancel")).clicked() {
                     close = true;
                 }
                 if ui
                     .add_enabled(
                         validation.is_ok(),
-                        egui::Button::new("Сохранить").fill(ACCENT),
+                        egui::Button::new(language.text("Save")).fill(ACCENT),
                     )
                     .clicked()
                 {

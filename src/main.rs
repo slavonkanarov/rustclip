@@ -3,6 +3,7 @@ mod app;
 mod autostart;
 mod clipboard;
 mod hotkeys;
+mod i18n;
 mod model;
 mod secrets;
 
@@ -51,7 +52,7 @@ fn main() -> eframe::Result {
     }
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_title("RustClip (История буфера обмена)")
+            .with_title("RustClip (Clipboard history)")
             .with_icon(
                 eframe::icon_data::from_png_bytes(include_bytes!("../assets/icon.png"))
                     .expect("valid app icon"),

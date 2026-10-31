@@ -21,7 +21,7 @@ pub fn parse(value: &str) -> Result<Hotkey, String> {
             "WIN" | "META" => modifiers |= MOD_WIN,
             _ => {
                 if key.is_some() {
-                    return Err(format!("Лишняя клавиша в комбинации: {value}"));
+                    return Err(format!("Extra key in shortcut: {value}"));
                 }
                 key = Some(match part.as_str() {
                     "UP" | "↑" => VK_UP as u32,
@@ -44,15 +44,15 @@ pub fn parse(value: &str) -> Result<Hotkey, String> {
                     }
                     _ if part.starts_with('F') => match part[1..].parse::<u32>() {
                         Ok(n @ 1..=24) => VK_F1 as u32 + n - 1,
-                        _ => return Err(format!("Неизвестная клавиша: {part}")),
+                        _ => return Err(format!("Unknown key: {part}")),
                     },
-                    _ => return Err(format!("Неизвестная клавиша: {part}")),
+                    _ => return Err(format!("Unknown key: {part}")),
                 });
             }
         }
     }
     if modifiers == MOD_NOREPEAT || key.is_none() {
-        return Err(format!("Нужны модификатор и клавиша: {value}"));
+        return Err(format!("A modifier and a key are required: {value}"));
     }
     Ok(Hotkey {
         modifiers,
@@ -75,7 +75,7 @@ pub fn validate(settings: &Settings) -> Result<(), String> {
         let hotkey = parse(value)?;
         let pair = (hotkey.modifiers & !MOD_NOREPEAT, hotkey.key);
         if used.contains(&pair) {
-            return Err(format!("Повторяющаяся комбинация: {value}"));
+            return Err(format!("Duplicate shortcut: {value}"));
         }
         used.push(pair);
     }

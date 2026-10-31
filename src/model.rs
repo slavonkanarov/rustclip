@@ -1,3 +1,4 @@
+use crate::i18n::Language;
 use serde::{Deserialize, Serialize};
 use std::{
     fs,
@@ -19,7 +20,7 @@ pub struct Clip {
 }
 
 impl Clip {
-    pub fn title(&self) -> String {
+    pub fn title(&self, language: Language) -> String {
         if !self.text.is_empty() {
             self.text
                 .replace(['\r', '\n'], " ")
@@ -27,10 +28,11 @@ impl Clip {
                 .take(70)
                 .collect()
         } else if !self.png.is_empty() {
-            "Картинка".into()
+            language.text("Picture").into()
         } else {
             format!(
-                "Данные: {}",
+                "{} {}",
+                language.text("Data:"),
                 self.formats
                     .iter()
                     .map(|f| f.0.as_str())
@@ -47,6 +49,7 @@ impl Clip {
 #[derive(Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
+    pub language: Language,
     pub autostart: bool,
     pub monitor: bool,
     pub auto_paste: bool,
@@ -71,6 +74,7 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Self {
+            language: Language::English,
             autostart: false,
             monitor: true,
             auto_paste: true,
@@ -159,7 +163,7 @@ pub fn load() -> (Vec<Clip>, Settings, Vec<String>) {
     let mut errors = Vec::new();
     let settings = match fs::read(directory().join("settings.json")) {
         Ok(bytes) => serde_json::from_slice(&bytes).unwrap_or_else(|e| {
-            errors.push(format!("Настройки: {e}"));
+            errors.push(format!("Settings: {e}"));
             Settings::default()
         }),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Settings::default(),

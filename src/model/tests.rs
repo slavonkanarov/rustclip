@@ -18,6 +18,17 @@ fn old_settings_gain_defaults() {
     assert!(!s.monitor);
     assert!(!s.autostart);
     assert_eq!(s.paste_delay, 200);
+    assert_eq!(s.language, Language::English);
+}
+
+#[test]
+fn language_survives_settings_roundtrip() {
+    let mut settings = Settings::default();
+    settings.language = Language::Russian;
+    let json = serde_json::to_value(&settings).unwrap();
+    assert_eq!(json["language"], "ru");
+    let restored: Settings = serde_json::from_value(json).unwrap();
+    assert_eq!(restored.language, Language::Russian);
 }
 #[test]
 fn settings_can_be_saved_again() {
