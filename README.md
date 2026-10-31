@@ -6,7 +6,7 @@ RustClip is a clipboard history manager for Windows, written in Rust. It saves c
 
 The history includes search by content, source application, or label; favorites; previews; plain-text paste; clip export; and a history backup. You can configure global shortcuts and exclude applications from capture. A separate **Secrets** tab stores entries in an encrypted vault with folders and application bindings. Regular clipboard history is not encrypted.
 
-The application interface is currently in Russian. RustClip targets Windows x64. Building from source requires the Rust MSVC toolchain, Visual Studio C++ Build Tools, and the Windows SDK.
+RustClip targets Windows x64. Building from source requires the Rust MSVC toolchain, Visual Studio C++ Build Tools, and the Windows SDK.
 
 ## Download
 
@@ -26,7 +26,7 @@ target/release/rustclip.exe --demo
 
 RustClip reports shortcuts that conflict with other applications. Closing the window hides it in the tray. To quit, use **File → Exit** or right-click the tray icon. Preferences (`F4`) and the clip editor (`F2`) open in separate windows.
 
-To start RustClip when you sign in, enable **Настройки → Общее → Запускать при входе в Windows** and click **Сохранить**. This setting is off by default, applies to the current user, and needs no administrator rights. Disable it before moving or deleting the EXE; after moving the EXE, enable it again from its new location.
+To start RustClip when you sign in, enable **Settings → General → Start when Windows starts** and click **Save**. This setting is off by default, applies to the current user, and needs no administrator rights. Disable it before moving or deleting the EXE; after moving the EXE, enable it again from its new location.
 
 ## Windows packages and releases
 
@@ -97,7 +97,7 @@ Packages are written to `target/package`. Without `RUSTCLIP_BUILD_VERSION`, a lo
 
 ## Use RustClip
 
-Configure global shortcuts in **Настройки → Горячие клавиши**: enter a combination such as `Ctrl+Shift+Up` and click **OK**. Ctrl, Shift, Alt, Win, letters, digits, arrows, F1–F24, and common control keys are supported. Duplicate and invalid combinations are rejected; RustClip reports combinations already registered by another application.
+Configure global shortcuts in **Settings → Hotkeys**: click **…** to record a combination such as `Ctrl+Shift+Up`, then save the shortcut and settings. Ctrl, Shift, Alt, Win, letters, digits, arrows, F1–F24, and common control keys are supported. Duplicate and invalid combinations are rejected; RustClip reports combinations already registered by another application.
 
 | Shortcut | Action |
 | --- | --- |
@@ -111,11 +111,11 @@ Configure global shortcuts in **Настройки → Горячие клави
 
 ### Secrets
 
-Open **Настройки → Секреты** to create a PIN of at least four digits or a password. Until then, the Secrets tab shows a warning and does not save secrets. Names, values, and application bindings are stored separately from clipboard history in `secrets.vault`, encrypted with ChaCha20-Poly1305; a key is derived from the PIN or password with Argon2. The unlocked session and decrypted entries remain in memory until **Сбросить разблокировку** or exit; returning to history hides them from view. Only encrypted vault data is written to disk, including temporary files used while saving.
+Open **Settings → Secrets** to create a PIN of at least four digits or a password. Until then, the Secrets tab shows a warning and does not save secrets. Names, values, and application bindings are stored separately from clipboard history in `secrets.vault`, encrypted with ChaCha20-Poly1305; a key is derived from the PIN or password with Argon2. The unlocked session and decrypted entries remain in memory until **Lock vault** or exit; returning to history hides them from view. Only encrypted vault data is written to disk, including temporary files used while saving.
 
-Double-click a secret to paste it into the active window, or use **Только скопировать** to leave it in the clipboard. The secret temporarily passes through the system clipboard, but these actions do not add it to RustClip's history. After unlocking the vault, `Ctrl+Shift+D` can open secrets filtered for the active application when a matching secret exists. Older templates are moved into the encrypted vault when it is opened.
+Double-click a secret to paste it into the active window, or click its copy icon (**Copy value**) to leave it in the clipboard. The secret temporarily passes through the system clipboard, but these actions do not add it to RustClip's history. After unlocking the vault, `Ctrl+Shift+D` can open secrets filtered for the active application when a matching secret exists. Older templates are moved into the encrypted vault when it is opened.
 
-Every secret belongs to a folder. Names can repeat across folders; legacy secrets without folders are moved to **Импортированные**. You can search for secrets associated with an application across folders. Secret values are hidden by default and can be revealed per entry. A folder's application binding applies to its secrets unless a secret has its own binding. Secret and folder editors open separately. **Выбрать приложение…** lists the five most recent active applications and allows manual entry.
+Every secret belongs to a folder. Names can repeat across folders; legacy secrets without folders are moved to **Imported**. You can search for secrets associated with an application across folders. Secret values are hidden by default and can be revealed per entry. A folder's application binding applies to its secrets unless a secret has its own binding. Secret and folder editors open separately. **Choose application…** lists the five most recent active applications and allows manual entry.
 
 ## Data
 
