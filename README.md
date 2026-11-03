@@ -30,6 +30,32 @@ To start RustClip when you sign in, enable **Settings → General → Start when
 
 ## Windows packages and releases
 
+### Crash recovery and diagnostics
+
+RustClip supervises its UI process and restarts it after an abnormal exit, including native crashes.
+After a crash it uses safe mode: image decoding/previews are disabled and dialogs are embedded in
+the main window to avoid multi-window OpenGL context failures. You can also pass `--safe-mode`
+manually. Quit and launch again to return to normal mode. There are at most three automatic
+restarts after consecutive failures; five minutes of uptime resets the retry budget. Unsaved edits
+are not recovered; saved history and the encrypted vault remain on disk and the vault is locked.
+
+Logs are in `%APPDATA%\RustClip` (or `RUSTCLIP_DATA_DIR`): `runtime.log` records starts, errors,
+process exit codes and restarts; `crash.log` records Rust panics and backtraces. Each rotates at
+2 MiB to a `.log.old` file. Native crashes may only have an exit code, not a Rust backtrace.
+If logging cannot initialize, an error dialog is shown. Forced termination of both the supervisor
+and UI, power loss, and system shutdown cannot be logged/recovered reliably.
+
+Malformed history files are skipped with an error, not deleted. Damaged settings are copied to
+`settings.corrupt-<timestamp>.json` before defaults are used. Image decoding has dimension and
+allocation limits; a failed image preview is cached instead of retried every frame. History payload
+in memory is limited to 256 MiB: newest files are loaded first; skipped files remain on disk, and
+new captures are rejected with an error when the limit is reached. JSON saves flush to disk before
+atomic replacement. Logs do not intentionally include clip or vault contents, but exception messages
+and local paths can contain private information: inspect logs before sharing them.
+
+To test actual crash recovery with isolated demo data, run `.\scripts\test-recovery.ps1` after
+building the MSVC release executable. The test stops only its own processes and cleans up its data.
+
 The [Windows MSI workflow](.github/workflows/windows-msi.yml) runs on pushes to `dev`, `release`, and `main`; on `v*` tags; on pull requests to those branches; and manually from **Actions → Windows MSI → Run workflow**. It checks formatting and tests, builds a Windows x64 EXE and MSI, then tests installation, upgrades, and removal. Builds use MSVC with a statically linked CRT.
 
 Successful workflow runs provide the `rustclip-windows-x64` Actions artifact for 90 days:

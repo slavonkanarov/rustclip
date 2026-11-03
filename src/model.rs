@@ -2,6 +2,7 @@ use crate::i18n::Language;
 use serde::{Deserialize, Serialize};
 use std::{
     fs,
+    io::Read,
     os::windows::ffi::OsStrExt,
     path::PathBuf,
     time::{SystemTime, UNIX_EPOCH},
@@ -20,6 +21,16 @@ pub struct Clip {
 }
 
 impl Clip {
+    pub fn memory_bytes(&self) -> usize {
+        self.formats.iter().fold(
+            self.text
+                .len()
+                .saturating_add(self.source.len())
+                .saturating_add(self.label.len())
+                .saturating_add(self.png.len()),
+            |total, (name, bytes)| total.saturating_add(name.len()).saturating_add(bytes.len()),
+        )
+    }
     pub fn title(&self, language: Language) -> String {
         if !self.text.is_empty() {
             self.text
@@ -130,17 +141,63 @@ pub fn backup(clips: &[Clip], settings: &Settings) -> Result<PathBuf, String> {
     Ok(path)
 }
 pub fn save_clip(clip: &Clip) -> Result<(), String> {
+    validate_clip(clip)?;
     write_json(
         &directory().join("clips").join(format!("{}.json", clip.id)),
         clip,
     )
 }
+pub const MAX_HISTORY_BYTES: usize = 256 * 1024 * 1024;
+
+pub fn validate_clip(clip: &Clip) -> Result<(), String> {
+    if clip.id == u128::MAX || clip.memory_bytes() > 64 * 1024 * 1024 {
+        return Err("Invalid clip ID or clip exceeds the 64 MiB limit".into());
+    }
+    if clip.formats.len() > 64
+        || clip.formats.iter().any(|(name, bytes)| {
+            !matches!(
+                name.as_str(),
+                "1" | "7"
+                    | "8"
+                    | "13"
+                    | "15"
+                    | "16"
+                    | "17"
+                    | "HTML Format"
+                    | "Rich Text Format"
+                    | "PNG"
+            ) || bytes.len() > 32 * 1024 * 1024
+        })
+    {
+        return Err("Unsupported clipboard format or format exceeds the 32 MiB limit".into());
+    }
+    Ok(())
+}
+
+fn read_json<T: serde::de::DeserializeOwned>(
+    path: &std::path::Path,
+    max: u64,
+) -> Result<T, String> {
+    let file = fs::File::open(path).map_err(|e| e.to_string())?;
+    let mut bytes = Vec::new();
+    file.take(max + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|e| e.to_string())?;
+    if bytes.len() as u64 > max {
+        return Err("JSON file exceeds the size limit".into());
+    }
+    serde_json::from_slice(&bytes).map_err(|e| e.to_string())
+}
 pub fn write_json(path: &std::path::Path, value: &impl Serialize) -> Result<(), String> {
     fs::create_dir_all(path.parent().ok_or("No parent directory")?).map_err(|e| e.to_string())?;
     let temp = path.with_extension("tmp");
-    fs::write(&temp, serde_json::to_vec(value).map_err(|e| e.to_string())?)
-        .map_err(|e| e.to_string())?;
-    use windows_sys::Win32::Storage::FileSystem::{MOVEFILE_REPLACE_EXISTING, MoveFileExW};
+    let mut file = fs::File::create(&temp).map_err(|e| e.to_string())?;
+    serde_json::to_writer(&mut file, value).map_err(|e| e.to_string())?;
+    file.sync_all().map_err(|e| e.to_string())?;
+    drop(file);
+    use windows_sys::Win32::Storage::FileSystem::{
+        MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW,
+    };
     let wide = |path: &std::path::Path| {
         path.as_os_str()
             .encode_wide()
@@ -151,7 +208,7 @@ pub fn write_json(path: &std::path::Path, value: &impl Serialize) -> Result<(), 
         MoveFileExW(
             wide(&temp).as_ptr(),
             wide(path).as_ptr(),
-            MOVEFILE_REPLACE_EXISTING,
+            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
         )
     } == 0
     {
@@ -160,32 +217,73 @@ pub fn write_json(path: &std::path::Path, value: &impl Serialize) -> Result<(), 
     Ok(())
 }
 pub fn load() -> (Vec<Clip>, Settings, Vec<String>) {
+    let result = load_from(&directory(), MAX_HISTORY_BYTES);
+    for error in &result.2 {
+        crate::diagnostics::log(&format!("Loading data: {error}"));
+    }
+    result
+}
+
+fn load_from(directory: &std::path::Path, budget: usize) -> (Vec<Clip>, Settings, Vec<String>) {
     let mut errors = Vec::new();
-    let settings = match fs::read(directory().join("settings.json")) {
-        Ok(bytes) => serde_json::from_slice(&bytes).unwrap_or_else(|e| {
+    let settings_path = directory.join("settings.json");
+    let settings = if !settings_path.exists() {
+        Settings::default()
+    } else {
+        read_json(&settings_path, 1024 * 1024).unwrap_or_else(|e| {
             errors.push(format!("Settings: {e}"));
+            let copy = directory.join(format!("settings.corrupt-{}.json", now()));
+            match fs::copy(&settings_path, &copy) {
+                Ok(_) => errors.push(format!("Settings recovery copy: {}", copy.display())),
+                Err(e) => errors.push(format!("Could not preserve damaged settings: {e}")),
+            }
             Settings::default()
-        }),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Settings::default(),
-        Err(e) => {
-            errors.push(e.to_string());
-            Settings::default()
-        }
+        })
     };
     let mut clips: Vec<Clip> = Vec::new();
-    if let Ok(entries) = fs::read_dir(directory().join("clips")) {
-        for entry in entries
-            .flatten()
-            .filter(|e| e.path().extension().is_some_and(|e| e == "json"))
-        {
-            match fs::read(entry.path())
-                .map_err(|e| e.to_string())
-                .and_then(|b| serde_json::from_slice(&b).map_err(|e| e.to_string()))
-            {
-                Ok(clip) => clips.push(clip),
-                Err(e) => errors.push(format!("{}: {e}", entry.path().display())),
+    let mut used = 0usize;
+    let mut skipped = 0;
+    match fs::read_dir(directory.join("clips")) {
+        Ok(entries) => {
+            let mut paths = Vec::new();
+            for entry in entries {
+                match entry {
+                    Ok(entry) if entry.path().extension().is_some_and(|e| e == "json") => {
+                        paths.push(entry.path())
+                    }
+                    Ok(_) => {}
+                    Err(e) => errors.push(format!("Read history directory: {e}")),
+                }
+            }
+            paths.sort_by_key(|path| {
+                std::cmp::Reverse(
+                    path.file_stem()
+                        .and_then(|s| s.to_str())
+                        .and_then(|s| s.parse::<u128>().ok())
+                        .unwrap_or_default(),
+                )
+            });
+            for path in paths {
+                match read_json::<Clip>(&path, 256 * 1024 * 1024).and_then(|clip| {
+                    validate_clip(&clip)?;
+                    Ok(clip)
+                }) {
+                    Ok(clip) if used.saturating_add(clip.memory_bytes()) <= budget => {
+                        used += clip.memory_bytes();
+                        clips.push(clip);
+                    }
+                    Ok(_) => skipped += 1,
+                    Err(e) => errors.push(format!("{}: {e}", path.display())),
+                }
             }
         }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => errors.push(format!("Read history directory: {e}")),
+    }
+    if skipped > 0 {
+        errors.push(format!(
+            "History memory limit: {skipped} clips not loaded; files remain on disk"
+        ));
     }
     clips.sort_by_key(|c| c.id);
     (clips, settings, errors)

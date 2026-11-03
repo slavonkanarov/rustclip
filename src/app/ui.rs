@@ -20,7 +20,20 @@ impl eframe::App for App {
             self.quitting = true;
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
         }
-        while let Ok(event) = self.rx.try_recv() {
+        loop {
+            let event = match self.rx.try_recv() {
+                Ok(event) => event,
+                Err(std::sync::mpsc::TryRecvError::Empty) => break,
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    if !self.quitting {
+                        crate::diagnostics::log(
+                            "Clipboard worker disconnected; restarting application",
+                        );
+                        std::process::exit(70);
+                    }
+                    break;
+                }
+            };
             match event {
                 Event::Captured(clip) => self.add(clip),
                 Event::ActiveApp(path) => {
@@ -64,6 +77,7 @@ impl eframe::App for App {
                     }
                 }
                 Event::Error(e) => {
+                    crate::diagnostics::log(&format!("Clipboard error: {e}"));
                     self.secret_copied = None;
                     self.status = e;
                 }
@@ -86,7 +100,11 @@ impl eframe::App for App {
         }
     }
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
-        let _ = model::write_json(&model::directory().join("settings.json"), &self.settings);
+        if let Err(e) = model::write_json(&model::directory().join("settings.json"), &self.settings)
+        {
+            crate::diagnostics::log(&format!("Save settings on exit: {e}"));
+            crate::diagnostics::notify(&format!("Could not save settings: {e}"));
+        }
         self.lock_secrets();
         self.send(Command::Quit);
     }
@@ -554,11 +572,11 @@ impl eframe::App for App {
                                 .join(", ")
                         ),
                     );
-                    if !c.png.is_empty() {
-                        let width =
-                            (cols[1].available_width() * ctx.pixels_per_point()).max(1.0) as u32;
+                    if !c.png.is_empty() && !crate::diagnostics::safe_mode() {
+                        let width = (cols[1].available_width() * ctx.pixels_per_point())
+                            .clamp(1.0, 4096.0) as u32;
                         if self.texture.as_ref().map(|t| (t.0, t.1)) != Some((c.id, width)) {
-                            if let Ok(img) = image::load_from_memory(&c.png) {
+                            let result = crate::images::decode(&c.png, false).map(|img| {
                                 let img = if img.width() > width {
                                     img.resize(
                                         width,
@@ -573,25 +591,41 @@ impl eframe::App for App {
                                 };
                                 let img = img.to_rgba8();
                                 let size = [img.width() as usize, img.height() as usize];
-                                self.texture = Some((
-                                    c.id,
-                                    width,
-                                    ctx.load_texture(
-                                        "preview",
-                                        egui::ColorImage::from_rgba_unmultiplied(
-                                            size,
-                                            img.as_raw(),
-                                        ),
-                                        Default::default(),
-                                    ),
+                                ctx.load_texture(
+                                    "preview",
+                                    egui::ColorImage::from_rgba_unmultiplied(size, img.as_raw()),
+                                    Default::default(),
+                                )
+                            });
+                            if let Err(e) = &result {
+                                crate::diagnostics::log(&format!(
+                                    "Preview image clip={}: {e}",
+                                    c.id
                                 ));
                             }
+                            self.texture = Some((c.id, width, result));
                         }
-                        if let Some((_, _, tex)) = &self.texture {
-                            cols[1].add(egui::Image::new(tex).fit_to_exact_size(
-                                tex.size_vec2()
-                                    * (cols[1].available_width() / tex.size_vec2().x).min(1.),
-                            ));
+                        if let Some((_, _, result)) = &self.texture {
+                            match result {
+                                Ok(tex) => {
+                                    cols[1].add(
+                                        egui::Image::new(tex).fit_to_exact_size(
+                                            tex.size_vec2()
+                                                * (cols[1].available_width() / tex.size_vec2().x)
+                                                    .min(1.),
+                                        ),
+                                    );
+                                }
+                                Err(e) => {
+                                    cols[1].colored_label(
+                                        egui::Color32::LIGHT_RED,
+                                        format!(
+                                            "{}: {e}",
+                                            language.text("Image preview unavailable")
+                                        ),
+                                    );
+                                }
+                            }
                         }
                     } else {
                         egui::ScrollArea::vertical()

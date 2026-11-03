@@ -213,6 +213,15 @@ fn file_list(bytes: &[u8]) -> Option<String> {
     )
 }
 fn capture(hwnd: HWND, settings: &Settings, allow_own: bool) -> Result<Option<Clip>, String> {
+    let result = crate::diagnostics::recover("Clipboard capture", || {
+        capture_inner(hwnd, settings, allow_own)
+    });
+    if let Err(e) = &result {
+        crate::diagnostics::log(&format!("Clipboard capture failed: {e}"));
+    }
+    result
+}
+fn capture_inner(hwnd: HWND, settings: &Settings, allow_own: bool) -> Result<Option<Clip>, String> {
     let source = executable(unsafe { GetClipboardOwner() });
     if !allow_own && excluded(&source, &settings.excluded_capture) {
         return Ok(None);
@@ -292,28 +301,18 @@ fn capture(hwnd: HWND, settings: &Settings, allow_own: bool) -> Result<Option<Cl
         String::from_utf16_lossy(&title[..len.max(0) as usize])
     );
     drop(guard);
-    if clip
-        .formats
-        .iter()
-        .any(|(n, _)| matches!(n.as_str(), "8" | "17" | "PNG"))
+    if !crate::diagnostics::safe_mode()
+        && let Some((name, bytes)) = ["PNG", "17", "8"]
+            .iter()
+            .find_map(|name| clip.formats.iter().find(|(format, _)| format == name))
     {
-        if let Ok(mut cb) = arboard::Clipboard::new() {
-            if let Ok(img) = cb.get_image() {
-                if let Some(buffer) = image::RgbaImage::from_raw(
-                    img.width as u32,
-                    img.height as u32,
-                    img.bytes.into_owned(),
-                ) {
-                    let mut cursor = std::io::Cursor::new(Vec::new());
-                    if buffer
-                        .write_to(&mut cursor, image::ImageFormat::Png)
-                        .is_ok()
-                    {
-                        clip.png = cursor.into_inner();
-                    }
-                }
-            }
-        }
+        let buffer = crate::images::decode(bytes, name != "PNG")
+            .map_err(|e| format!("Clipboard image ({name}, {} bytes): {e}", bytes.len()))?;
+        let mut cursor = std::io::Cursor::new(Vec::new());
+        buffer
+            .write_to(&mut cursor, image::ImageFormat::Png)
+            .map_err(|e| e.to_string())?;
+        clip.png = cursor.into_inner();
     }
     if unsafe { GetClipboardSequenceNumber() } != sequence {
         return Ok(None);
@@ -334,6 +333,7 @@ pub fn text_clip(text: String) -> Clip {
     }
 }
 fn publish(hwnd: HWND, clip: &Clip, plain: bool) -> Result<u32, String> {
+    crate::model::validate_clip(clip)?;
     let plain_clip;
     let formats = if plain {
         if clip.text.is_empty() {
@@ -474,7 +474,31 @@ pub fn start(
     ctx: eframe::egui::Context,
     initial_target: usize,
 ) {
-    thread::spawn(move || unsafe {
+    let spawned = thread::Builder::new()
+        .name("clipboard".into())
+        .spawn(move || {
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                run_worker(tx, rx, settings, ctx, initial_target);
+            }));
+            if result.is_err() {
+                crate::diagnostics::log("Clipboard worker panicked; restarting application");
+                std::process::exit(70);
+            }
+        });
+    if let Err(e) = spawned {
+        crate::diagnostics::log(&format!("Could not start clipboard worker: {e}"));
+        std::process::exit(70);
+    }
+}
+
+fn run_worker(
+    tx: Sender<Event>,
+    rx: Receiver<Command>,
+    settings: Settings,
+    ctx: eframe::egui::Context,
+    initial_target: usize,
+) {
+    unsafe {
         let mut settings = settings;
         let class = wide("RustClip.Listener");
         let wc = WNDCLASSW {
@@ -498,8 +522,17 @@ pub fn start(
             wc.hInstance,
             null(),
         );
+        if hwnd.is_null() || AddClipboardFormatListener(hwnd) == 0 {
+            crate::diagnostics::log(&format!(
+                "Could not initialize clipboard listener: {}",
+                std::io::Error::last_os_error()
+            ));
+            if !hwnd.is_null() {
+                DestroyWindow(hwnd);
+            }
+            return;
+        }
         ShowWindow(hwnd, SW_SHOWNOACTIVATE);
-        AddClipboardFormatListener(hwnd);
         let icon = tray_icon(wc.hInstance);
         let mut tray = NOTIFYICONDATAW {
             cbSize: std::mem::size_of::<NOTIFYICONDATAW>() as u32,
@@ -690,6 +723,8 @@ pub fn start(
                     Command::Copy(clip, plain, number) => {
                         if let Err(e) = publish(hwnd, &clip, plain) {
                             let _ = tx.send(Event::Error(e));
+                            ctx.request_repaint();
+                            continue;
                         }
                         preview.show(
                             &clip,
@@ -701,7 +736,15 @@ pub fn start(
                     }
                     Command::Secret(clip, should_paste, index) => {
                         if should_paste {
-                            let old = capture(hwnd, &settings, true).ok().flatten();
+                            let old = match capture(hwnd, &settings, true) {
+                                Ok(old) => old,
+                                Err(e) => {
+                                    let _ =
+                                        tx.send(Event::Error(format!("Clipboard restore: {e}")));
+                                    ctx.request_repaint();
+                                    continue;
+                                }
+                            };
                             pending = Some((clip, true, old, target, true));
                         } else {
                             match publish(hwnd, &clip, true) {
@@ -718,7 +761,15 @@ pub fn start(
                     Command::Paste(clip, plain, destination, number) => {
                         let paste_target = destination.map_or(target, |handle| handle as HWND);
                         let old = if settings.restore {
-                            capture(hwnd, &settings, true).ok().flatten()
+                            match capture(hwnd, &settings, true) {
+                                Ok(old) => old,
+                                Err(e) => {
+                                    let _ =
+                                        tx.send(Event::Error(format!("Clipboard restore: {e}")));
+                                    ctx.request_repaint();
+                                    continue;
+                                }
+                            }
                         } else {
                             None
                         };
@@ -776,8 +827,12 @@ pub fn start(
             }) {
                 if let Some((old, seq, _)) = restore.take() {
                     if GetClipboardSequenceNumber() == seq {
-                        if let Ok(seq) = publish(hwnd, &old, false) {
-                            secret_sequences.push(seq);
+                        match publish(hwnd, &old, false) {
+                            Ok(seq) => secret_sequences.push(seq),
+                            Err(e) => {
+                                let _ = tx.send(Event::Error(format!("Clipboard restore: {e}")));
+                                ctx.request_repaint();
+                            }
                         }
                     }
                 }
@@ -817,7 +872,8 @@ pub fn start(
             }
         }
         DestroyWindow(hwnd);
-    });
+        DestroyWindow(preview.hwnd);
+    }
 }
 
 unsafe fn register_hotkeys(

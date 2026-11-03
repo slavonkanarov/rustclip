@@ -51,12 +51,14 @@ pub(crate) struct App {
     app_icons: HashMap<String, egui::TextureHandle>,
     editor: Option<(Option<usize>, String)>,
     status: String,
-    texture: Option<(u128, u32, egui::TextureHandle)>,
+    texture: Option<(u128, u32, Result<egui::TextureHandle, String>)>,
     quitting: bool,
 }
 
 impl App {
     pub(crate) fn new(cc: &eframe::CreationContext<'_>, initial_target: usize) -> Self {
+        cc.egui_ctx
+            .set_embed_viewports(crate::diagnostics::safe_mode());
         cc.egui_ctx.set_theme(egui::ThemePreference::Dark);
         let mut visuals = egui::Visuals::dark();
         visuals.panel_fill = BACKGROUND;
@@ -95,7 +97,10 @@ impl App {
                 .text_styles
                 .insert(egui::TextStyle::Heading, egui::FontId::proportional(24.));
         });
-        let (mut clips, mut settings, errors) = model::load();
+        let (mut clips, mut settings, mut errors) = model::load();
+        if crate::diagnostics::safe_mode() {
+            errors.push("Safe mode: image previews are disabled and dialogs use the main window. Restart RustClip to leave safe mode.".into());
+        }
         cc.egui_ctx.send_viewport_cmd(egui::ViewportCommand::Title(
             settings
                 .language
@@ -172,14 +177,23 @@ impl App {
     fn send(&mut self, command: Command) {
         if self.tx.send(command).is_err() {
             self.status = "Clipboard worker stopped".into();
+            crate::diagnostics::log(&self.status);
         }
     }
-    fn persist(&mut self, index: usize) {
+    fn persist(&mut self, index: usize) -> bool {
         if let Err(e) = model::save_clip(&self.clips[index]) {
+            crate::diagnostics::log(&format!("Save clip id={}: {e}", self.clips[index].id));
             self.status = e;
+            return false;
         }
+        true
     }
     fn add(&mut self, mut clip: Clip) {
+        if let Err(e) = model::validate_clip(&clip) {
+            crate::diagnostics::log(&format!("Rejected clip id={}: {e}", clip.id));
+            self.status = e;
+            return;
+        }
         if !clip.snippet
             && self
                 .clips
@@ -191,11 +205,24 @@ impl App {
         {
             return;
         }
-        clip.id = clip.id.max(self.clips.last().map_or(0, |c| c.id + 1));
+        clip.id = clip
+            .id
+            .max(self.clips.last().map_or(0, |c| c.id.saturating_add(1)));
+        if clip.id == u128::MAX
+            || self.clips.iter().fold(clip.memory_bytes(), |total, c| {
+                total.saturating_add(c.memory_bytes())
+            }) > model::MAX_HISTORY_BYTES
+        {
+            self.status = "History memory limit reached; remove clips before capturing more".into();
+            crate::diagnostics::log(&self.status);
+            return;
+        }
         self.clips.push(clip);
         let i = self.clips.len() - 1;
         self.selected = Some(i);
-        self.persist(i);
+        if !self.persist(i) {
+            return;
+        }
         if self.settings.limit > 0 {
             while self
                 .clips
