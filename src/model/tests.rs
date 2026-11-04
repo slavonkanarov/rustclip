@@ -20,6 +20,7 @@ fn old_settings_gain_defaults() {
     assert_eq!(s.paste_delay, 200);
     assert_eq!(s.language, Language::English);
     assert_eq!(s.hotkey_layout, "Ctrl+Shift+T");
+    assert!(!s.layout_enabled);
     assert_eq!(s.layout_first, 0x04090409);
     assert_eq!(s.layout_second, 0x04190419);
 }
@@ -27,6 +28,7 @@ fn old_settings_gain_defaults() {
 #[test]
 fn layout_settings_survive_roundtrip() {
     let settings = Settings {
+        layout_enabled: true,
         hotkey_layout: "Ctrl+Alt+T".into(),
         layout_first: 0x08090809,
         layout_second: 0x04070407,
@@ -35,8 +37,21 @@ fn layout_settings_survive_roundtrip() {
     let restored: Settings =
         serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();
     assert_eq!(restored.hotkey_layout, settings.hotkey_layout);
+    assert!(restored.layout_enabled);
     assert_eq!(restored.layout_first, settings.layout_first);
     assert_eq!(restored.layout_second, settings.layout_second);
+}
+
+#[test]
+fn existing_layout_settings_stay_disabled_until_enabled() {
+    let settings: Settings = serde_json::from_str(
+        r#"{"hotkey_layout":"Ctrl+Alt+T","layout_first":134809609,"layout_second":67568647}"#,
+    )
+    .unwrap();
+    assert!(!settings.layout_enabled);
+    assert_eq!(settings.hotkey_layout, "Ctrl+Alt+T");
+    assert_eq!(settings.layout_first, 0x08090809);
+    assert_eq!(settings.layout_second, 0x04070407);
 }
 
 #[test]

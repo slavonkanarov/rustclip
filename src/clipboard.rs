@@ -626,6 +626,9 @@ fn run_worker(
                         active
                     };
                     if msg.wParam == 5 {
+                        if !settings.layout_enabled {
+                            continue;
+                        }
                         preview.hide();
                         pending = None;
                         if let Err(error) = selection.switch(hwnd, destination, &settings) {

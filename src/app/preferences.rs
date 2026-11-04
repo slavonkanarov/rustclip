@@ -63,8 +63,10 @@ fn settings_navigation(
 impl App {
     fn save_preferences(&mut self, ctx: &egui::Context) -> Result<(), String> {
         hotkeys::validate(&self.draft)?;
-        if self.draft.layout_first != self.settings.layout_first
-            || self.draft.layout_second != self.settings.layout_second
+        if self.draft.layout_enabled
+            && (!self.settings.layout_enabled
+                || self.draft.layout_first != self.settings.layout_first
+                || self.draft.layout_second != self.settings.layout_second)
         {
             crate::layouts::validate(self.draft.layout_first, self.draft.layout_second)?;
         }
@@ -188,7 +190,48 @@ impl App {
                                     ui.selectable_value(&mut self.draft.language, option, option.name());
                                 }
                             });
-                        ui.checkbox(&mut self.draft.autostart,language.text("Start when Windows starts"));ui.checkbox(&mut self.draft.monitor,language.text("Monitor clipboard"));ui.checkbox(&mut self.draft.hide_after,language.text("Hide after copying or pasting"));ui.label(language.text("Closing the window minimizes RustClip to the tray."));ui.label(format!("{} {}", language.text("Data:"), model::directory().display()));},
+                        ui.checkbox(&mut self.draft.autostart,language.text("Start when Windows starts"));ui.checkbox(&mut self.draft.monitor,language.text("Monitor clipboard"));ui.checkbox(&mut self.draft.hide_after,language.text("Hide after copying or pasting"));ui.label(language.text("Closing the window minimizes RustClip to the tray."));
+                        ui.separator();
+                        ui.label(language.text("Selection keyboard layouts"));
+                        ui.checkbox(&mut self.draft.layout_enabled, language.text("Enable selection layout conversion"));
+                        ui.add_enabled_ui(self.draft.layout_enabled, |ui| {
+                            ui.horizontal(|ui| {
+                                ui.label(language.text("Switch selection layout"));
+                                ui.label(self.draft.hotkey_layout.as_str());
+                                if ui.button("…").on_hover_text(language.text("Record shortcut")).clicked() {
+                                    match hotkeys::Recorder::new(ui.ctx()) {
+                                        Ok(recorder) => self.hotkey_recorder = Some((4, recorder)),
+                                        Err(error) => self.status = error,
+                                    }
+                                }
+                            });
+                            ui.label(language.text("Click “…” to record a shortcut. Changes take effect after saving settings."));
+                            if self.draft.layout_enabled {
+                                if let Err(error) = hotkeys::validate(&self.draft) {
+                                    ui.colored_label(egui::Color32::RED, language.message(&error));
+                                }
+                                match crate::layouts::installed() {
+                                    Ok(layouts) => {
+                                        for (index, value) in [&mut self.draft.layout_first, &mut self.draft.layout_second].into_iter().enumerate() {
+                                            egui::ComboBox::from_id_salt(("selection_layout", index))
+                                                .selected_text(layouts.iter().find(|layout| layout.id == *value).map(|layout| layout.name.clone()).unwrap_or_else(|| format!("{value:08X}")))
+                                                .show_ui(ui, |ui| {
+                                                    for layout in &layouts {
+                                                        ui.selectable_value(value, layout.id, &layout.name);
+                                                    }
+                                                });
+                                        }
+                                        if let Err(error) = crate::layouts::validate(self.draft.layout_first, self.draft.layout_second) {
+                                            ui.colored_label(egui::Color32::LIGHT_RED, language.message(&error));
+                                        }
+                                    }
+                                    Err(error) => { ui.colored_label(egui::Color32::LIGHT_RED, language.message(&error)); }
+                                }
+                            }
+                            ui.label(language.text("Detect by the last letter; keep the replacement selected. Works on key press, without releasing modifiers."));
+                        });
+                        ui.label(format!("{} {}", language.text("Data:"), model::directory().display()));
+                    },
                     1=>{
                         ui.label(language.text("Global shortcuts (Ctrl, Shift, Alt, Win + key):"));
                         egui::Grid::new("hotkey_grid").num_columns(3).show(ui, |ui| {
@@ -197,7 +240,6 @@ impl App {
                                 (language.text("Previous clip"), &mut self.draft.hotkey_previous),
                                 (language.text("Next clip"), &mut self.draft.hotkey_next),
                                 (language.text("Paste as text"), &mut self.draft.hotkey_plain_paste),
-                                (language.text("Switch selection layout"), &mut self.draft.hotkey_layout),
                             ].into_iter().enumerate() {
                                 ui.label(name);
                                 ui.label(value.as_str());
@@ -215,26 +257,6 @@ impl App {
                             ui.colored_label(egui::Color32::RED, language.message(&error));
                         }
                         ui.checkbox(&mut self.draft.auto_paste,language.text("Paste automatically after Quick Copy"));
-                        ui.separator();
-                        ui.label(language.text("Selection keyboard layouts"));
-                        match crate::layouts::installed() {
-                            Ok(layouts) => {
-                                for (index, value) in [&mut self.draft.layout_first, &mut self.draft.layout_second].into_iter().enumerate() {
-                                    egui::ComboBox::from_id_salt(("selection_layout", index))
-                                        .selected_text(layouts.iter().find(|layout| layout.id == *value).map(|layout| layout.name.clone()).unwrap_or_else(|| format!("{value:08X}")))
-                                        .show_ui(ui, |ui| {
-                                            for layout in &layouts {
-                                                ui.selectable_value(value, layout.id, &layout.name);
-                                            }
-                                        });
-                                }
-                                if let Err(error) = crate::layouts::validate(self.draft.layout_first, self.draft.layout_second) {
-                                    ui.colored_label(egui::Color32::LIGHT_RED, language.message(&error));
-                                }
-                            }
-                            Err(error) => { ui.colored_label(egui::Color32::LIGHT_RED, language.message(&error)); }
-                        }
-                        ui.label(language.text("Detect by the last letter; keep the replacement selected. Works on key press, without releasing modifiers."));
                     },
                     2=>{ui.label(language.text("Maximum number of unstarred clips"));ui.add(egui::DragValue::new(&mut self.draft.limit).speed(1.).range(1..=usize::MAX));ui.label(language.text("Check recent clips for duplicates"));ui.add(egui::DragValue::new(&mut self.draft.duplicates).speed(1.).range(0..=100));ui.checkbox(&mut self.draft.newest_first,language.text("Newest clips first"));},
                     3=>{ui.checkbox(&mut self.draft.ctrl_v,language.text("Emulate Ctrl+V (otherwise Shift+Insert)"));ui.checkbox(&mut self.draft.restore,language.text("Restore clipboard after pasting"));ui.label(language.text("Compatibility delay, ms"));ui.add(egui::DragValue::new(&mut self.draft.paste_delay).speed(1.).range(20..=2000));},

@@ -130,13 +130,14 @@ Configure global shortcuts in **Settings → Hotkeys**: click **…** to record 
 | `Ctrl+Shift+D` | Open clipboard history |
 | `Ctrl+Shift+↑` / `↓` | Select an older/newer clip and show a central preview; holding the keys starts cycling after a pause, every 120 ms; optionally paste on release |
 | `Ctrl+Shift+V` | Paste the current clipboard contents as plain text |
-| `Ctrl+Shift+T` | Switch the keyboard layout of selected editable text and keep the result selected; fires on key-down |
+| `Ctrl+Shift+T` | Switch the keyboard layout of selected editable text and keep the result selected; fires on key-down (disabled by default) |
 | `Enter` / `Shift+Enter` | Paste the selected clip / paste as plain text, unless focus is in a text field |
 | `F2` / `F4` | Open the clip editor / preferences |
 | `Esc` | Hide the window and central preview |
 | `Alt+X` | Quit while the main window is open |
 
-Choose the two installed Windows keyboard layouts under **Settings → Hotkeys → Selection keyboard layouts** (English/Russian by default).
+Enable **Settings → General → Selection keyboard layouts → Enable selection layout conversion**, choose the shortcut and two installed Windows keyboard layouts (English/Russian by default), then save settings.
+The feature is off by default, including for existing settings without the enable flag. While disabled, its shortcut is not registered or monitored and remains available to other applications.
 For example, `руддщ` becomes `hello`. The last letter determines the source layout, ignoring trailing spaces, digits, and punctuation.
 If both layouts contain that letter, the active layout breaks the tie; repeated conversions of the same selection reverse the previous conversion.
 Ctrl and Shift can stay held while you press T repeatedly. There is no configured paste delay.

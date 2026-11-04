@@ -60,14 +60,16 @@ pub fn parse(value: &str) -> Result<Hotkey, String> {
     })
 }
 
-pub fn bindings(settings: &Settings) -> [(i32, &str); 5] {
+pub fn bindings(settings: &Settings) -> impl Iterator<Item = (i32, &str)> {
     [
-        (1, &settings.hotkey_open),
-        (2, &settings.hotkey_previous),
-        (3, &settings.hotkey_next),
-        (4, &settings.hotkey_plain_paste),
-        (5, &settings.hotkey_layout),
+        (1, settings.hotkey_open.as_str()),
+        (2, settings.hotkey_previous.as_str()),
+        (3, settings.hotkey_next.as_str()),
+        (4, settings.hotkey_plain_paste.as_str()),
+        (5, settings.hotkey_layout.as_str()),
     ]
+    .into_iter()
+    .filter(|(id, _)| *id != 5 || settings.layout_enabled)
 }
 
 pub fn validate(settings: &Settings) -> Result<(), String> {

@@ -58,7 +58,7 @@ pub fn validate(first: u32, second: u32) -> Result<(), String> {
         .iter()
         .any(|id| !layouts.iter().any(|layout| layout.id == *id))
     {
-        return Err("Choose two installed keyboard layouts in Settings > Hotkeys".into());
+        return Err("Choose two installed keyboard layouts in Settings > General".into());
     }
     Ok(())
 }
@@ -115,7 +115,7 @@ impl Converter {
                 .iter()
                 .find(|layout| layout.id == id)
                 .map(|layout| layout.handle)
-                .ok_or("Choose two installed keyboard layouts in Settings > Hotkeys")
+                .ok_or("Choose two installed keyboard layouts in Settings > General")
         };
         let first_handle = handle(first)?;
         let second_handle = handle(second)?;

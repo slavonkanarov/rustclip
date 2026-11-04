@@ -82,6 +82,7 @@ pub struct Settings {
     pub hotkey_next: String,
     pub hotkey_plain_paste: String,
     pub hotkey_layout: String,
+    pub layout_enabled: bool,
     pub layout_first: u32,
     pub layout_second: u32,
 }
@@ -110,6 +111,7 @@ impl Default for Settings {
             hotkey_next: "Ctrl+Shift+Down".into(),
             hotkey_plain_paste: "Ctrl+Shift+V".into(),
             hotkey_layout: "Ctrl+Shift+T".into(),
+            layout_enabled: false,
             layout_first: 0x04090409,
             layout_second: 0x04190419,
         }
