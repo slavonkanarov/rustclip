@@ -1,88 +1,114 @@
 # RustClip
 
-Проект создан по принципу белой комнаты.
+**English** | [Русский](docs/README.ru.md)
 
-## Запуск
+RustClip is a clipboard history manager for Windows, written in Rust. It saves copied text, images, and supported clipboard formats so you can find an earlier clip and paste it into the active application. It stays in the system tray: closing the window hides it, and a global shortcut opens the history again.
+
+The history includes search by content, source application, or label; favorites; previews; plain-text paste; clip export; and a history backup. You can configure global shortcuts and exclude applications from capture. A separate **Secrets** tab stores entries in an encrypted vault with folders and application bindings. Regular clipboard history is not encrypted.
+
+RustClip targets Windows x64. Building from source requires the Rust MSVC toolchain, Visual Studio C++ Build Tools, and the Windows SDK.
+
+## Download
+
+Get the MSI installer or portable ZIP from [GitHub Releases](https://github.com/slavonkanarov/rustclip/releases). The MSI installs for all users and requires administrator rights; the ZIP runs without installation. Installation does not launch RustClip or enable startup with Windows.
+
+## Run from source
 
 ```powershell
 cargo run --release
 ```
 
-Собранный файл: `target/release/rustclip.exe`. Для проверки внешнего вида без мониторинга и регистрации горячих клавиш:
+The executable is `target/release/rustclip.exe`. To inspect the interface without clipboard monitoring or global shortcuts, run:
 
 ```powershell
 target/release/rustclip.exe --demo
 ```
- 
-RustClip показывает ошибку регистрации конфликтующих комбинаций. Нажатие крестика скрывает окно в трей; завершение — `Файл → Выход` или правый щелчок по значку трея.
 
-Настройки (`F4`) и редактор клипа (`F2`) открываются отдельными окнами.
+RustClip reports shortcuts that conflict with other applications. Closing the window hides it in the tray. To quit, use **File → Exit** or right-click the tray icon. Preferences (`F4`) and the clip editor (`F2`) open in separate windows.
 
-Автозапуск включается в `Настройки → Общее → Запускать при входе в Windows` кнопкой «Сохранить». По умолчанию он выключен. Настройка действует для текущего пользователя и не требует прав администратора. Перед удалением или переносом EXE отключите автозапуск; после переноса включите его снова из нового расположения.
+To start RustClip when you sign in, enable **Settings → General → Start when Windows starts** and click **Save**. This setting is off by default, applies to the current user, and needs no administrator rights. Disable it before moving or deleting the EXE; after moving the EXE, enable it again from its new location.
 
-## Установка и сборки GitHub
+## Windows packages and releases
 
-[Windows MSI workflow](.github/workflows/windows-msi.yml) запускается при push в `dev`, `release`, `main`, по тегам `v*`, при pull request в эти ветки и вручную через **Actions → Windows MSI → Run workflow**. Он проверяет форматирование и тесты, собирает Windows x64 EXE и MSI, проверяет установку, обновление и удаление. Сборки используют MSVC со статической библиотекой CRT.
+### Crash recovery and diagnostics
 
-После успешной сборки в Actions доступен артефакт `rustclip-windows-x64` (90 дней хранения):
+RustClip supervises its UI process and restarts it after an abnormal exit, including native crashes.
+After a crash it uses safe mode: image decoding/previews are disabled and dialogs are embedded in
+the main window to avoid multi-window OpenGL context failures. You can also pass `--safe-mode`
+manually. Quit and launch again to return to normal mode. There are at most three automatic
+restarts after consecutive failures; five minutes of uptime resets the retry budget. Unsaved edits
+are not recovered; saved history and the encrypted vault remain on disk and the vault is locked.
 
-- `RustClip-<версия>-x64.msi` — мастер установки с лицензией, установкой в `C:\Program Files\RustClip` и ярлыком в меню «Пуск»; требуются права администратора.
-- `RustClip-<версия>-windows-x64.zip` — EXE, лицензия и README для запуска без установки.
-- `rustclip.exe`, `LICENSE` и `SHA256SUMS.txt` — отдельный исполняемый файл, лицензия и контрольные суммы.
+Logs are in `%APPDATA%\RustClip` (or `RUSTCLIP_DATA_DIR`): `runtime.log` records starts, errors,
+process exit codes and restarts; `crash.log` records Rust panics and backtraces. Each rotates at
+2 MiB to a `.log.old` file. Native crashes may only have an exit code, not a Rust backtrace.
+If logging cannot initialize, an error dialog is shown. Forced termination of both the supervisor
+and UI, power loss, and system shutdown cannot be logged/recovered reliably.
 
-### Версии и выпуск
+Malformed history files are skipped with an error, not deleted. Damaged settings are copied to
+`settings.corrupt-<timestamp>.json` before defaults are used. Image decoding has dimension and
+allocation limits; a failed image preview is cached instead of retried every frame. History payload
+in memory is limited to 256 MiB: newest files are loaded first; skipped files remain on disk, and
+new captures are rejected with an error when the limit is reached. JSON saves flush to disk before
+atomic replacement. Logs do not intentionally include clip or vault contents, but exception messages
+and local paths can contain private information: inspect logs before sharing them.
 
-`Cargo.toml` хранит базовую версию `major.minor.patch`, например `0.1.0`. Номер сборки и канал добавляются автоматически:
+To test actual crash recovery with isolated demo data, run `.\scripts\test-recovery.ps1` after
+building the MSVC release executable. The test stops only its own processes and cleans up its data.
 
-| Ветка или тег | Версия сборки | Публикация |
-|---|---|---|
-| `dev` | `0.1.0-dev.<номер Actions>` | Артефакт Actions |
-| `release` (необязательно) | `0.1.0-rc.<номер Actions>` | Артефакт Actions; тег `v0.1.0-rc.1` создаёт предварительный выпуск |
-| `main` | `0.1.0` | Артефакт Actions; тег `v0.1.0` создаёт финальный выпуск |
+The [Windows MSI workflow](.github/workflows/windows-msi.yml) runs on pushes to `dev`, `release`, and `main`; on `v*` tags; on pull requests to those branches; and manually from **Actions → Windows MSI → Run workflow**. It checks formatting and tests, builds a Windows x64 EXE and MSI, then tests installation, upgrades, and removal. Builds use MSVC with a statically linked CRT.
 
-Рабочий процесс: изменения попадают в `dev`, затем через pull request в `main`. Если нужна проверка кандидата, сначала используйте ветку `release`, а после проверки переносите её в `main`. Для небольшого выпуска можно перейти из `dev` прямо в `main`. После успешной сборки `main` создайте тег на её коммите и отправьте его:
+Successful workflow runs provide the `rustclip-windows-x64` Actions artifact for 90 days:
 
-```powershell
-git switch main
-git tag v0.1.0
-git push origin v0.1.0
-```
+- `RustClip-<version>-x64.msi`: installer with a license screen, installation to `C:\Program Files\RustClip`, and a Start menu shortcut; requires administrator rights.
+- `RustClip-<version>-windows-x64.zip`: EXE, license, and English and Russian READMEs for portable use.
+- `rustclip.exe`, `LICENSE`, and `SHA256SUMS.txt`: individual executable, license, and checksums.
 
-Тег должен совпадать с версией в `Cargo.toml` и указывать на коммит ветки `main`; RC-тег — на коммит ветки `release`. После финального выпуска увеличьте базовую версию в `Cargo.toml` на `dev` для следующего цикла. Версия сборки видна в меню «Помощь» и именах MSI/ZIP; Windows Installer использует только числовую базовую версию, поэтому сборки `dev`, RC и финальная сборка одной версии обновляют друг друга как версии `0.1.0`. Финальные и предварительные выпуски доступны в [Releases](https://github.com/slavonkanarov/rustclip/releases) после публикации workflow в GitHub.
+### Versioning
 
-Установка не запускает RustClip автоматически и не включает автозапуск. Перед обновлением завершите приложение через значок трея. MSI обновляет существующую установку, в том числе сборку с той же версией; более старую версию поверх новой установить нельзя.
+`Cargo.toml` sets the minimum `major.minor.patch` version, for example `0.1.0`. The next patch number is calculated from published stable tags in the same series: `v0.1.0`, then `v0.1.1`, and so on. This calculation does not change `Cargo.toml`.
 
-При обычном удалении MSI показывает выбор: **сохранить данные** (по умолчанию) или **Also delete this user's RustClip data**. Второй вариант безвозвратно удаляет историю, настройки, зашифрованные секреты, резервные копии и экспорты из `%APPDATA%\RustClip` текущего пользователя. Данные других пользователей и каталоги, заданные через `RUSTCLIP_DATA_DIR`, не удаляются. При обновлении данные сохраняются. ZIP/EXE также используют `%APPDATA%\RustClip`, а не папку с программой.
+| Branch or tag | Build version | Distribution |
+| --- | --- | --- |
+| `dev` | `<next version>-dev.<Actions run number>` | Actions artifact |
+| `release` (optional) | `<next version>-rc.<Actions run number>` | Actions artifact; an RC tag creates a prerelease |
+| `main` | `<next version>` | Actions artifact; a successful build automatically creates a stable tag and final release |
 
-При тихом удалении данные сохраняются; для явного удаления данных передайте `DELETEUSERDATA=1`:
+Changes normally go to `dev`, then to `main` through a pull request. Use the optional `release` branch to check a release candidate before merging into `main`. Each successful `main` build tags its commit as `v<version>` and publishes a final release. Stable tags must point to commits on `main`; RC tags must point to commits on `release`. To start a new major or minor series, change `Cargo.toml`; patch versions advance automatically. The build version appears in the **Help** menu and package names. Windows Installer uses the numeric version without a suffix, so the next stable release upgrades the previous one.
+
+Quit RustClip through the tray before upgrading. An MSI can upgrade an existing installation, including a build with the same version; it cannot install an older version over a newer one. The MSI and portable EXE both store user data in `%APPDATA%\RustClip`, outside the installation directory.
+
+When uninstalling the MSI interactively, you can **keep data** (the default) or select **Also delete this user's RustClip data**. The latter permanently removes the current user's history, settings, encrypted secrets, backups, and exports from `%APPDATA%\RustClip`. It does not remove other users' data or directories selected with `RUSTCLIP_DATA_DIR`. Upgrades preserve data.
+
+Silent uninstallation keeps data unless you set `DELETEUSERDATA=1`:
 
 ```powershell
 msiexec /x RustClip-0.1.0-x64.msi /qn
-# Удалить также данные текущего пользователя:
+# Also remove the current user's data:
 msiexec /x RustClip-0.1.0-x64.msi /qn DELETEUSERDATA=1
 ```
 
-### Сборка и установка без MSI
+### Local installation without MSI
 
-Из корня проекта выполните:
+From the repository root, run:
 
 ```powershell
 .\scripts\install-local.ps1
 ```
 
-Скрипт собирает release-версию, копирует EXE, значок, лицензию и README в `%LOCALAPPDATA%\Programs\RustClip` и создаёт ярлык в меню «Пуск» текущего пользователя. MSI, WiX, .NET SDK и права администратора не нужны. Программа автоматически не запускается; история, настройки и секреты в `%APPDATA%\RustClip` сохраняются. Для обновления завершите установленный RustClip через трей и повторите команду.
+The script requests administrator rights, builds a release EXE, installs it with the icon, license, and both READMEs to `C:\Program Files\RustClip`, and creates a Start menu shortcut. If RustClip was installed through MSI, the script removes the old MSI registration before copying files. It updates an existing per-user shortcut and startup entry, and removes an old local copy in `%LOCALAPPDATA%\Programs\RustClip` after installation. WiX and the .NET SDK are not needed. The script does not start RustClip; history, settings, and secrets in `%APPDATA%\RustClip` are kept. Quit RustClip through the tray and rerun the script to update it.
 
-Для сборки должны быть установлены Rust с инструментарием `stable-x86_64-pc-windows-msvc` и Visual Studio C++ Build Tools с Windows SDK. При первой сборке Cargo скачивает зависимости. Если инструменты и зависимости уже есть локально, можно запретить сетевые обращения Cargo:
+The first Cargo build may download dependencies. If the tools and dependencies are already available locally, use:
 
 ```powershell
 .\scripts\install-local.ps1 -Offline
 ```
 
-Другой каталог установки задаётся через `-InstallDir 'D:\Apps\RustClip'`. Скрипт не добавляет запись в список установленных приложений Windows. Для удаления завершите RustClip, удалите его каталог установки и ярлык `%APPDATA%\Microsoft\Windows\Start Menu\Programs\RustClip.lnk`; данные в `%APPDATA%\RustClip` можно сохранить или удалить отдельно.
+This script does not create an entry in Windows' installed-apps list. To remove this installation, quit RustClip, delete `C:\Program Files\RustClip` and `%ProgramData%\Microsoft\Windows\Start Menu\Programs\RustClip.lnk`, and remove any remaining per-user shortcut. You can keep or remove `%APPDATA%\RustClip` separately.
 
-### Локальная сборка MSI
+### Build an MSI locally
 
-Нужны Rust MSVC, Visual Studio C++ Build Tools с Windows SDK и .NET SDK 8. Команды из корня проекта:
+You need Rust MSVC, Visual Studio C++ Build Tools with the Windows SDK, and .NET SDK 8. Run from the repository root:
 
 ```powershell
 rustup toolchain install stable-x86_64-pc-windows-msvc --profile minimal
@@ -93,31 +119,37 @@ dotnet tool install wix --version 6.0.2 --tool-path ./target/tools/wix --add-sou
 ./scripts/package-windows.ps1 -Wix ./target/tools/wix/wix.exe
 ```
 
-Результат находится в `target/package`. Локальная сборка без `RUSTCLIP_BUILD_VERSION` использует базовую версию из `Cargo.toml`; формат для MSI — `major.minor.patch` (до `255.255.65535`). Установщик пока не подписан цифровой подписью.
+Packages are written to `target/package`. Without `RUSTCLIP_BUILD_VERSION`, a local build uses the base version from `Cargo.toml`. The MSI version must fit `major.minor.patch` with a maximum of `255.255.65535`. The installer is not digitally signed.
 
-Глобальные комбинации изменяются в `Настройки → Горячие клавиши`: введите, например, `Ctrl+Shift+Up` и нажмите `OK`. Поддерживаются Ctrl, Shift, Alt, Win, буквы, цифры, стрелки, F1–F24 и основные служебные клавиши. Повторяющиеся и некорректные комбинации не сохраняются; если сочетание занято другой программой, RustClip сообщает об этом.
+## Use RustClip
 
-| Комбинация | Действие |
-|---|---|
-| Ctrl+Shift+D | Открыть историю |
-| Ctrl+Shift+↑ / ↓ | Перейти к старому/новому клипу, показать центральное превью; при удержании после паузы листать каждые 120 мс; при включённой опции вставить после отпускания клавиш |
-| Ctrl+Shift+V | Вставить текущий Clipboard как простой текст |
-| Enter / Shift+Enter | Вставить выбранный клип / простой текст, если ввод не находится в текстовом поле |
-| F2 / F4 | Редактор клипа / настройки |
-| Esc | Скрыть окно и центральное превью |
-| Alt+X | Завершить приложение, когда открыто главное окно |
+Configure global shortcuts in **Settings → Hotkeys**: click **…** to record a combination such as `Ctrl+Shift+Up`, then save the shortcut and settings. Ctrl, Shift, Alt, Win, letters, digits, arrows, F1–F24, and common control keys are supported. Duplicate and invalid combinations are rejected; RustClip reports combinations already registered by another application.
 
-Секреты доступны на отдельной вкладке. Защита настраивается в «Настройки → Секреты»: создайте PIN (от 4 цифр) или пароль. До этого вкладка показывает предупреждение и не сохраняет секреты. Названия, значения и привязки к приложениям сохраняются отдельно от истории в `secrets.vault` с шифрованием ChaCha20-Poly1305; ключ выводится из PIN/пароля через Argon2. Введённый PIN или пароль хранится в памяти до команды «Сбросить разблокировку» или выхода из программы. При открытии вкладки данные расшифровываются в памяти, а при переходе к истории удаляются из списка в памяти. На диск записывается только зашифрованный файл, включая временный файл при сохранении. Двойной щелчок вставляет секрет в активное окно, кнопка «Только скопировать» оставляет его в буфере обмена. Эти действия не добавляют секрет в историю RustClip. Ctrl+Shift+D открывает историю; после разблокировки хранилища, если у активного приложения есть привязанный секрет, открывается поиск секретов по этому приложению. Старые шаблоны переносятся в зашифрованное хранилище при его открытии.
+| Shortcut | Action |
+| --- | --- |
+| `Ctrl+Shift+D` | Open clipboard history |
+| `Ctrl+Shift+↑` / `↓` | Select an older/newer clip and show a central preview; holding the keys starts cycling after a pause, every 120 ms; optionally paste on release |
+| `Ctrl+Shift+V` | Paste the current clipboard contents as plain text |
+| `Enter` / `Shift+Enter` | Paste the selected clip / paste as plain text, unless focus is in a text field |
+| `F2` / `F4` | Open the clip editor / preferences |
+| `Esc` | Hide the window and central preview |
+| `Alt+X` | Quit while the main window is open |
 
-Секреты отображаются карточками выбранной папки. Общего списка нет: каждый секрет находится в папке, и одинаковые названия допустимы в разных папках. Старые секреты без папки переносятся в папку «Импортированные». Поиск по приложению показывает подходящие секреты из разных папок. Значение каждого секрета можно скрывать или показывать; новые и ранее созданные секреты по умолчанию скрыты. Привязка приложения к папке действует на все её секреты без собственной привязки. Редакторы секрета и папки открываются отдельно. Кнопка «Выбрать приложение…» показывает последние пять активных приложений и поле для ручного ввода.
+### Secrets
 
-## Данные
+Open **Settings → Secrets** to create a PIN of at least four digits or a password. Until then, the Secrets tab shows a warning and does not save secrets. Names, values, and application bindings are stored separately from clipboard history in `secrets.vault`, encrypted with ChaCha20-Poly1305; a key is derived from the PIN or password with Argon2. The unlocked session and decrypted entries remain in memory until **Lock vault** or exit; returning to history hides them from view. Only encrypted vault data is written to disk, including temporary files used while saving.
 
-По умолчанию `%APPDATA%\RustClip`: `clips/`, `settings.json`, `Backup/`, `exports/`. Для изолированной проверки можно задать `RUSTCLIP_DATA_DIR`. Данные сохраняются без шифрования.
+Double-click a secret to paste it into the active window, or click its copy icon (**Copy value**) to leave it in the clipboard. The secret temporarily passes through the system clipboard, but these actions do not add it to RustClip's history. After unlocking the vault, `Ctrl+Shift+D` can open secrets filtered for the active application when a matching secret exists. Older templates are moved into the encrypted vault when it is opened.
 
-История хранится отдельными JSON-файлами; это начальный формат, не рассчитанный на загрузку многогигабайтной истории в память.
+Every secret belongs to a folder. Names can repeat across folders; legacy secrets without folders are moved to **Imported**. You can search for secrets associated with an application across folders. Secret values are hidden by default and can be revealed per entry. A folder's application binding applies to its secrets unless a secret has its own binding. Secret and folder editors open separately. **Choose application…** lists the five most recent active applications and allows manual entry.
 
-## Проверки
+## Data
+
+By default, RustClip uses `%APPDATA%\RustClip`: `clips/`, `settings.json`, `Backup/`, `exports/`, and `secrets.vault`. Set `RUSTCLIP_DATA_DIR` for an isolated test directory. History, settings, exports, and backups are unencrypted; the contents of `secrets.vault` are encrypted.
+
+History entries are stored as separate JSON files. This initial format loads history into memory and is not designed for multi-gigabyte histories.
+
+## Checks
 
 ```powershell
 cargo fmt --check
@@ -125,4 +157,4 @@ cargo test --offline
 cargo check --offline
 ```
 
-Подробный статус и известные ограничения: [IMPLEMENTATION.md](docs/IMPLEMENTATION.md).
+Licensed under [GPL-3.0-or-later](LICENSE).

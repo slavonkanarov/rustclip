@@ -111,7 +111,7 @@ fn key_name(key: u32) -> String {
         VK_END => "End",
         VK_PRIOR => "PageUp",
         VK_NEXT => "PageDown",
-        _ => return format!("Клавиша 0x{key:02X}"),
+        _ => return format!("Key 0x{key:02X}"),
     }
     .into()
 }
@@ -198,7 +198,7 @@ impl Recorder {
             );
             if hook.is_null() {
                 let _ = ready.send(Err(format!(
-                    "Не удалось начать запись: {}",
+                    "Could not start recording: {}",
                     std::io::Error::last_os_error()
                 )));
                 CAPTURE.set(None);

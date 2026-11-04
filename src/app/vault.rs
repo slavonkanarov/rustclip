@@ -69,7 +69,7 @@ impl App {
         let folder = vault.import_folder();
         vault.extend(templates.iter().map(|clip| secrets::Secret {
             name: if clip.label.is_empty() {
-                clip.title()
+                clip.title(self.settings.language)
             } else {
                 clip.label.clone()
             },
@@ -135,6 +135,7 @@ impl App {
         }
     }
     pub(super) fn unlock_dialog(&mut self, ctx: &egui::Context) {
+        let language = self.settings.language;
         if !self.unlock_open {
             return;
         }
@@ -142,11 +143,11 @@ impl App {
         let mut cancel = false;
         egui::Modal::new(egui::Id::new("rustclip-unlock")).show(ctx, |ui| {
             ui.set_min_width(340.);
-            ui.heading("Разблокировать секреты");
+            ui.heading(language.text("Unlock secrets"));
             ui.label(if self.pin_mode {
-                "Введите PIN"
+                language.text("Enter PIN")
             } else {
-                "Введите пароль"
+                language.text("Enter password")
             });
             let response = ui.add(
                 egui::TextEdit::singleline(&mut self.unlock_input)
@@ -159,11 +160,11 @@ impl App {
             }
             submit = response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
             if !self.status.is_empty() {
-                ui.colored_label(egui::Color32::RED, &self.status);
+                ui.colored_label(egui::Color32::RED, language.message(&self.status));
             }
             ui.horizontal(|ui| {
-                submit |= ui.button("Разблокировать").clicked();
-                cancel = ui.button("Продолжить без PIN").clicked();
+                submit |= ui.button(language.text("Unlock")).clicked();
+                cancel = ui.button(language.text("Continue without PIN")).clicked();
             });
         });
         if cancel {
@@ -229,40 +230,41 @@ impl App {
         }
     }
     pub(super) fn setup_secrets_ui(&mut self, ui: &mut egui::Ui) {
+        let language = self.draft.language;
         if secrets::exists() {
-            ui.label("Шифрование секретов настроено.");
+            ui.label(language.text("Secret encryption is configured."));
             ui.label(if self.pin_mode {
-                "Способ защиты: PIN"
+                language.text("Protection method: PIN")
             } else {
-                "Способ защиты: пароль"
+                language.text("Protection method: password")
             });
-            if ui.button("Сбросить разблокировку").clicked() {
+            if ui.button(language.text("Lock vault")).clicked() {
                 self.lock_secrets();
             }
             return;
         }
-        ui.label("Создать зашифрованное хранилище секретов");
+        ui.label(language.text("Create an encrypted secret vault"));
         ui.horizontal(|ui| {
             ui.radio_value(&mut self.pin_mode, true, "PIN");
-            ui.radio_value(&mut self.pin_mode, false, "Пароль");
+            ui.radio_value(&mut self.pin_mode, false, language.text("Password"));
         });
         ui.label(if self.pin_mode {
-            "PIN (минимум 4 цифры)"
+            language.text("PIN (at least 4 digits)")
         } else {
-            "Пароль"
+            language.text("Password")
         });
         ui.add(egui::TextEdit::singleline(&mut self.credential_input).password(true));
-        ui.label("Повторите PIN или пароль");
+        ui.label(language.text("Repeat PIN or password"));
         ui.add(egui::TextEdit::singleline(&mut self.credential_confirm).password(true));
-        if ui.button("Создать хранилище").clicked() {
+        if ui.button(language.text("Create vault")).clicked() {
             if self.credential_input != self.credential_confirm {
-                self.status = "PIN или пароль не совпадают".into();
+                self.status = "PINs or passwords do not match".into();
             } else if self.credential_input.is_empty()
                 || self.pin_mode
                     && (!self.credential_input.bytes().all(|b| b.is_ascii_digit())
                         || self.credential_input.len() < 4)
             {
-                self.status = "PIN: минимум 4 цифры; пароль не должен быть пустым".into();
+                self.status = "PIN: at least 4 digits; password cannot be empty".into();
             } else {
                 match secrets::save(
                     &self.credential_input,
@@ -290,9 +292,10 @@ impl App {
         }
     }
     pub(super) fn secrets_ui(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
+        let language = self.settings.language;
         if !secrets::exists() {
-            ui.colored_label(egui::Color32::YELLOW, "Защита секретов не настроена. Добавьте PIN или пароль в Настройках → Секреты. До настройки секреты не сохраняются.");
-            if ui.button("Открыть настройки секретов").clicked() {
+            ui.colored_label(egui::Color32::YELLOW, language.text("Secret protection is not configured. Add a PIN or password in Settings → Secrets. Secrets are not saved until then."));
+            if ui.button(language.text("Open secret settings")).clicked() {
                 self.settings_page = 6;
                 self.open_preferences();
             }
@@ -302,13 +305,14 @@ impl App {
             return;
         }
         ui.horizontal(|ui| {
-            ui.heading("Секреты");
+            ui.heading(language.text("Secrets"));
             if ui
                 .add_enabled(
                     self.selected_folder.is_some()
                         && !self.filter_active_app
                         && self.secret_app_filter.is_empty(),
-                    egui::Button::new("+ Новый секрет").fill(egui::Color32::from_rgb(38, 120, 155)),
+                    egui::Button::new(language.text("+ New secret"))
+                        .fill(egui::Color32::from_rgb(38, 120, 155)),
                 )
                 .clicked()
             {
@@ -323,7 +327,7 @@ impl App {
                 });
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.button("Заблокировать").clicked() {
+                if ui.button(language.text("Lock")).clicked() {
                     self.lock_secrets();
                 }
             });
@@ -339,8 +343,8 @@ impl App {
         egui::Panel::left("secret_folders")
             .exact_size(190.)
             .show(ui, |ui| {
-                ui.heading("Папки");
-                if ui.button("+ Новая папка").clicked() {
+                ui.heading(language.text("Folders"));
+                if ui.button(language.text("+ New folder")).clicked() {
                     self.status.clear();
                     self.folder_edit_original = None;
                     self.folder_editor = Some(secrets::Folder {
@@ -371,12 +375,13 @@ impl App {
                                     self.filter_active_app = false;
                                     self.secret_app_filter.clear();
                                 }
-                                if secret_button(ui, "edit", "Изменить папку").clicked()
+                                if secret_button(ui, "edit", language.text("Edit folder")).clicked()
                                 {
                                     self.folder_edit_original = Some(folder.name.clone());
                                     self.folder_editor = Some(folder.clone());
                                 }
-                                if secret_button(ui, "delete", "Удалить папку").clicked()
+                                if secret_button(ui, "delete", language.text("Delete folder"))
+                                    .clicked()
                                 {
                                     delete_folder = Some(folder.name.clone());
                                 }
@@ -392,7 +397,7 @@ impl App {
                         .iter()
                         .any(|secret| secret.folder == name)
                     {
-                        self.status = "Сначала переместите или удалите секреты из папки".into();
+                        self.status = "Move or delete the secrets in this folder first".into();
                     } else {
                         self.vault
                             .as_mut()
@@ -422,15 +427,17 @@ impl App {
             }
             ui.heading(
                 if self.filter_active_app || !self.secret_app_filter.is_empty() {
-                    "Поиск по приложению"
+                    language.text("Search by application")
                 } else {
-                    self.selected_folder.as_deref().unwrap_or("Создайте папку")
+                    self.selected_folder
+                        .as_deref()
+                        .unwrap_or(language.text("Create a folder"))
                 },
             );
             ui.horizontal_wrapped(|ui| {
                 let search = ui.add(
                     egui::TextEdit::singleline(&mut self.query)
-                        .hint_text("Поиск по названию · Ctrl+F"),
+                        .hint_text(language.text("Search by name · Ctrl+F")),
                 );
                 if self.secret_editor.is_none()
                     && self.folder_editor.is_none()
@@ -442,13 +449,13 @@ impl App {
                 if ui
                     .add(
                         egui::TextEdit::singleline(&mut self.secret_app_filter)
-                            .hint_text("Поиск по приложению"),
+                            .hint_text(language.text("Search by application")),
                     )
                     .changed()
                 {
                     self.filter_active_app = false;
                 }
-                if ui.button("Очистить").clicked() {
+                if ui.button(language.text("Clear")).clicked() {
                     self.query.clear();
                     self.secret_app_filter.clear();
                     self.filter_active_app = false;
@@ -548,14 +555,22 @@ impl App {
                                                         index == i && at.elapsed().as_secs() < 3
                                                     },
                                                 );
-                                                if secret_button(ui, "delete", "Удалить секрет")
-                                                    .clicked()
+                                                if secret_button(
+                                                    ui,
+                                                    "delete",
+                                                    language.text("Delete secret"),
+                                                )
+                                                .clicked()
                                                 {
                                                     self.secret_selected = Some(i);
                                                     delete = true;
                                                 }
-                                                if secret_button(ui, "edit", "Изменить секрет")
-                                                    .clicked()
+                                                if secret_button(
+                                                    ui,
+                                                    "edit",
+                                                    language.text("Edit secret"),
+                                                )
+                                                .clicked()
                                                 {
                                                     self.secret_selected = Some(i);
                                                     edit = true;
@@ -564,9 +579,9 @@ impl App {
                                                     ui,
                                                     if secret.hidden { "show" } else { "hide" },
                                                     if secret.hidden {
-                                                        "Показать значение"
+                                                        language.text("Show value")
                                                     } else {
-                                                        "Скрыть значение"
+                                                        language.text("Hide value")
                                                     },
                                                 )
                                                 .clicked()
@@ -577,9 +592,9 @@ impl App {
                                                     ui,
                                                     if copied { "check" } else { "copy" },
                                                     if copied {
-                                                        "Скопировано в буфер обмена"
+                                                        language.text("Copied to clipboard")
                                                     } else {
-                                                        "Скопировать значение"
+                                                        language.text("Copy value")
                                                     },
                                                 )
                                                 .clicked()
@@ -599,11 +614,11 @@ impl App {
                 });
             if indices.is_empty() {
                 ui.label(if self.vault.as_ref().unwrap().folders.is_empty() {
-                    "Создайте первую папку слева, затем добавьте секрет."
+                    language.text("Create your first folder on the left, then add a secret.")
                 } else if self.vault.as_ref().unwrap().is_empty() {
-                    "В папке пока нет секретов. Нажмите «+ Новый секрет»."
+                    language.text("This folder has no secrets yet. Click “+ New secret”.")
                 } else {
-                    "В этой папке или по этому запросу секретов нет."
+                    language.text("No secrets in this folder or matching this search.")
                 });
             }
         });
@@ -640,16 +655,17 @@ impl App {
                 ui.set_min_width(400.);
                 if let Some(folder) = &mut self.folder_editor {
                     ui.heading(if self.folder_edit_original.is_some() {
-                        "Изменить папку"
+                        language.text("Edit folder")
                     } else {
-                        "Новая папка"
+                        language.text("New folder")
                     });
-                    ui.label("Название папки");
+                    ui.label(language.text("Folder name"));
                     ui.add(
                         egui::TextEdit::singleline(&mut folder.name).desired_width(f32::INFINITY),
                     );
                     secret_app_picker(
                         ui,
+                        language,
                         &mut folder.app,
                         &self.settings.recent_apps,
                         &mut self.app_icons,
@@ -659,13 +675,13 @@ impl App {
                     ui.horizontal(|ui| {
                         save = ui
                             .add(
-                                egui::Button::new("Сохранить папку")
+                                egui::Button::new(language.text("Save folder"))
                                     .fill(egui::Color32::from_rgb(38, 120, 155)),
                             )
                             .on_hover_text("Ctrl+Enter")
                             .clicked()
                             || super::widgets::save_requested(ui.ctx());
-                        if ui.button("Отмена").clicked() {
+                        if ui.button(language.text("Cancel")).clicked() {
                             self.folder_editor = None;
                             self.folder_edit_original = None;
                         }
@@ -673,13 +689,13 @@ impl App {
                     if save {
                         let folder = self.folder_editor.take().unwrap();
                         if folder.name.trim().is_empty() {
-                            self.status = "Введите название папки".into();
+                            self.status = "Enter a folder name".into();
                             self.folder_editor = Some(folder);
                         } else if self.vault.as_ref().unwrap().folders.iter().any(|existing| {
                             existing.name.to_lowercase() == folder.name.to_lowercase()
                                 && self.folder_edit_original.as_deref() != Some(&existing.name)
                         }) {
-                            self.status = "Папка с таким названием уже существует".into();
+                            self.status = "A folder with this name already exists".into();
                             self.folder_editor = Some(folder);
                         } else {
                             let vault = self.vault.as_mut().unwrap();
@@ -705,7 +721,7 @@ impl App {
                         }
                     }
                     if !self.status.is_empty() {
-                        ui.colored_label(egui::Color32::RED, &self.status);
+                        ui.colored_label(egui::Color32::RED, language.message(&self.status));
                     }
                 }
             });
@@ -713,21 +729,21 @@ impl App {
         if self.secret_editor.is_some() {
             egui::Modal::new(egui::Id::new("secret_editor")).show(ctx, |ui| {
                 ui.set_min_width(420.);
-                ui.heading("Секрет");
+                ui.heading(language.text("Secret"));
                 if let Some(secret) = &mut self.secret_editor {
-                    ui.label("Название");
+                    ui.label(language.text("Name"));
                     ui.add(
                         egui::TextEdit::singleline(&mut secret.name).desired_width(f32::INFINITY),
                     );
-                    ui.label("Значение");
-                    ui.checkbox(&mut secret.hidden, "Скрывать значение на карточке");
+                    ui.label(language.text("Value"));
+                    ui.checkbox(&mut secret.hidden, language.text("Hide value on card"));
                     ui.add(
                         egui::TextEdit::multiline(&mut secret.value)
                             .password(secret.hidden)
                             .desired_rows(5)
                             .desired_width(f32::INFINITY),
                     );
-                    egui::ComboBox::from_label("Папка")
+                    egui::ComboBox::from_label(language.text("Folder"))
                         .selected_text(&secret.folder)
                         .show_ui(ui, |ui| {
                             for folder in &self.vault.as_ref().unwrap().folders {
@@ -740,6 +756,7 @@ impl App {
                         });
                     secret_app_picker(
                         ui,
+                        language,
                         &mut secret.app,
                         &self.settings.recent_apps,
                         &mut self.app_icons,
@@ -750,7 +767,11 @@ impl App {
                                 folder.name == secret.folder && !folder.app.is_empty()
                             })
                         {
-                            ui.small(format!("Используется приложение папки: {}", folder.app));
+                            ui.small(format!(
+                                "{} {}",
+                                language.text("Using folder application:"),
+                                folder.app
+                            ));
                         }
                     }
                     ui.separator();
@@ -758,13 +779,13 @@ impl App {
                     ui.horizontal(|ui| {
                         save = ui
                             .add(
-                                egui::Button::new("Сохранить секрет")
+                                egui::Button::new(language.text("Save secret"))
                                     .fill(egui::Color32::from_rgb(38, 120, 155)),
                             )
                             .on_hover_text("Ctrl+Enter")
                             .clicked()
                             || super::widgets::save_requested(ui.ctx());
-                        if ui.button("Отмена").clicked() {
+                        if ui.button(language.text("Cancel")).clicked() {
                             if let Some(mut secret) = self.secret_editor.take() {
                                 secret.clear();
                             }
@@ -773,7 +794,7 @@ impl App {
                     if save {
                         let secret = self.secret_editor.take().unwrap();
                         if secret.name.trim().is_empty() {
-                            self.status = "Введите название секрета".into();
+                            self.status = "Enter a secret name".into();
                             self.secret_editor = Some(secret);
                         } else if !self
                             .vault
@@ -783,14 +804,15 @@ impl App {
                             .iter()
                             .any(|folder| folder.name == secret.folder)
                         {
-                            self.status = "Выберите папку для секрета".into();
+                            self.status = "Choose a folder for the secret".into();
                             self.secret_editor = Some(secret);
                         } else if self.vault.as_ref().unwrap().name_in_folder(
                             &secret.name,
                             &secret.folder,
                             self.secret_selected,
                         ) {
-                            self.status = "В этой папке уже есть секрет с таким названием".into();
+                            self.status =
+                                "A secret with this name already exists in this folder".into();
                             self.secret_editor = Some(secret);
                         } else {
                             let vault = self.vault.as_mut().unwrap();
@@ -805,7 +827,7 @@ impl App {
                         }
                     }
                     if !self.status.is_empty() {
-                        ui.colored_label(egui::Color32::RED, &self.status);
+                        ui.colored_label(egui::Color32::RED, language.message(&self.status));
                     }
                 }
             });

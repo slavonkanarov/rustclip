@@ -35,7 +35,12 @@ impl SettingsUi {
                     .exact_size(210.)
                     .resizable(false)
                     .show(ui, |ui| {
-                        settings_navigation(ui, &mut self.page, focus);
+                        settings_navigation(
+                            ui,
+                            &mut self.page,
+                            focus,
+                            crate::i18n::Language::English,
+                        );
                     });
                 egui::CentralPanel::default().show(ui, |ui| {
                     self.controls

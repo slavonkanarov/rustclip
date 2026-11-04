@@ -33,14 +33,32 @@ impl Preview {
             deadline: None,
         }
     }
-    pub(super) fn show(&mut self, clip: &Clip, target: HWND, timeout: u64, number: Option<usize>) {
+    pub(super) fn show(
+        &mut self,
+        clip: &Clip,
+        target: HWND,
+        timeout: u64,
+        number: Option<usize>,
+        language: crate::i18n::Language,
+    ) {
         self.number = number;
         self.text = if clip.text.is_empty() {
-            clip.title()
+            clip.title(language)
         } else {
             clip.text.chars().take(1800).collect()
         };
-        self.image = image::load_from_memory(&clip.png).ok().map(|i| {
+        self.image = if clip.png.is_empty() || crate::diagnostics::safe_mode() {
+            None
+        } else {
+            match crate::images::decode(&clip.png, false) {
+                Ok(i) => Some(i),
+                Err(e) => {
+                    crate::diagnostics::log(&format!("Preview image clip={}: {e}", clip.id));
+                    None
+                }
+            }
+        }
+        .map(|i| {
             if i.width() > 598 || i.height() > 398 {
                 i.resize(598, 398, image::imageops::FilterType::Lanczos3)
                     .to_rgba8()
@@ -70,7 +88,8 @@ impl Preview {
                 SWP_NOACTIVATE | SWP_SHOWWINDOW,
             );
         }
-        self.deadline = (timeout > 0).then(|| Instant::now() + Duration::from_millis(timeout));
+        self.deadline =
+            (timeout > 0).then(|| Instant::now() + Duration::from_millis(timeout.min(60_000)));
         unsafe {
             let dc = GetDC(self.hwnd);
             self.paint(dc);

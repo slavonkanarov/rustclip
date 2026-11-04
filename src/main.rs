@@ -2,35 +2,30 @@
 mod app;
 mod autostart;
 mod clipboard;
+mod diagnostics;
 mod hotkeys;
+mod i18n;
+mod images;
 mod model;
 mod secrets;
+mod supervisor;
 
 use app::App;
 use eframe::egui;
-use std::io::Write;
 
-fn main() -> eframe::Result {
-    let default_panic_hook = std::panic::take_hook();
-    std::panic::set_hook(Box::new(move |info| {
-        let directory = model::directory();
-        if std::fs::create_dir_all(&directory).is_ok()
-            && let Ok(mut log) = std::fs::OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(directory.join("crash.log"))
-        {
-            let _ = writeln!(
-                log,
-                "{}: {info}\n{}",
-                model::now(),
-                std::backtrace::Backtrace::force_capture()
-            );
+fn main() {
+    if let Err(e) = diagnostics::install() {
+        diagnostics::notify(&format!("Cannot initialize diagnostic logs: {e}"));
+        std::process::exit(1);
+    }
+    if std::env::args_os().any(|arg| arg == "--internal-run") {
+        if let Err(e) = run_app() {
+            diagnostics::log(&format!("Application error: {e}"));
+            std::process::exit(1);
         }
-        default_panic_hook(info);
-    }));
+        return;
+    }
     use windows_sys::Win32::{Foundation::*, System::Threading::*, UI::WindowsAndMessaging::*};
-    let initial_target = unsafe { GetForegroundWindow() } as usize;
     let demo = std::env::args().any(|arg| arg == "--demo");
     let mutex_name = if demo {
         "Local\\RustClip.DemoSingleInstance"
@@ -38,7 +33,14 @@ fn main() -> eframe::Result {
         "Local\\RustClip.SingleInstance"
     };
     let mutex = unsafe { CreateMutexW(std::ptr::null(), 0, clipboard::wide(mutex_name).as_ptr()) };
-    if !mutex.is_null() && unsafe { GetLastError() } == ERROR_ALREADY_EXISTS {
+    if mutex.is_null() {
+        diagnostics::notify(&format!(
+            "Cannot create application mutex: {}",
+            std::io::Error::last_os_error()
+        ));
+        std::process::exit(1);
+    }
+    if unsafe { GetLastError() } == ERROR_ALREADY_EXISTS {
         unsafe {
             let hwnd = FindWindowW(
                 clipboard::wide("RustClip.Listener").as_ptr(),
@@ -47,11 +49,25 @@ fn main() -> eframe::Result {
             PostMessageW(hwnd, WM_APP + 1, 0, WM_LBUTTONUP as isize);
             CloseHandle(mutex);
         }
-        return Ok(());
+        return;
     }
+    let result = supervisor::run();
+    unsafe {
+        CloseHandle(mutex);
+    }
+    if let Err(e) = result {
+        diagnostics::log(&format!("Supervisor stopped: {e}"));
+        diagnostics::notify(&format!("{e}\nLogs: {}", model::directory().display()));
+        std::process::exit(1);
+    }
+}
+
+fn run_app() -> eframe::Result {
+    let initial_target =
+        unsafe { windows_sys::Win32::UI::WindowsAndMessaging::GetForegroundWindow() } as usize;
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_title("RustClip (История буфера обмена)")
+            .with_title("RustClip (Clipboard history)")
             .with_icon(
                 eframe::icon_data::from_png_bytes(include_bytes!("../assets/icon.png"))
                     .expect("valid app icon"),
@@ -60,15 +76,9 @@ fn main() -> eframe::Result {
             .with_min_inner_size([880., 560.]),
         ..Default::default()
     };
-    let result = eframe::run_native(
+    eframe::run_native(
         "RustClip",
         options,
         Box::new(move |cc| Ok(Box::new(App::new(cc, initial_target)))),
-    );
-    if !mutex.is_null() {
-        unsafe {
-            CloseHandle(mutex);
-        }
-    }
-    result
+    )
 }

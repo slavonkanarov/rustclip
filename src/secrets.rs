@@ -59,7 +59,7 @@ impl VaultData {
         }
     }
     pub fn import_folder(&mut self) -> String {
-        let name = "Импортированные";
+        let name = "Imported";
         if !self.folders.iter().any(|folder| folder.name == name) {
             self.folders.push(Folder {
                 name: name.into(),
@@ -164,7 +164,7 @@ fn decrypt(key: &[u8; 32], file: VaultFile) -> Result<VaultData, String> {
     let plaintext = ChaCha20Poly1305::new(key.into())
         .decrypt(Nonce::from_slice(&file.nonce), file.ciphertext.as_ref());
     let mut plaintext =
-        plaintext.map_err(|_| "Неверный PIN/пароль или повреждено хранилище".to_string())?;
+        plaintext.map_err(|_| "Incorrect PIN/password or damaged vault".to_string())?;
     let result = serde_json::from_slice(&plaintext)
         .or_else(|_| {
             serde_json::from_slice::<Vec<Secret>>(&plaintext).map(|secrets| VaultData {
