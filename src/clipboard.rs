@@ -1,4 +1,5 @@
 mod preview;
+mod selection;
 use preview::Preview;
 
 use crate::{
@@ -105,6 +106,13 @@ unsafe extern "system" fn procedure(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) 
     unsafe { DefWindowProcW(hwnd, msg, w, l) }
 }
 struct ClipboardLock;
+fn dispatch_sent_messages() {
+    let mut msg = MSG::default();
+    unsafe {
+        PeekMessageW(&mut msg, null_mut(), 0, 0, PM_NOREMOVE | PM_QS_SENDMESSAGE);
+    }
+}
+
 impl Drop for ClipboardLock {
     fn drop(&mut self) {
         unsafe {
@@ -114,6 +122,7 @@ impl Drop for ClipboardLock {
 }
 fn lock(hwnd: HWND) -> Result<ClipboardLock, String> {
     for _ in 0..10 {
+        dispatch_sent_messages();
         if unsafe { OpenClipboard(hwnd) } != 0 {
             return Ok(ClipboardLock);
         }
@@ -347,6 +356,10 @@ fn publish(hwnd: HWND, clip: &Clip, plain: bool) -> Result<u32, String> {
     if formats.is_empty() {
         return Err("Clip is empty".into());
     }
+    publish_formats(hwnd, formats)
+}
+
+fn publish_formats(hwnd: HWND, formats: &[(String, Vec<u8>)]) -> Result<u32, String> {
     let guard = lock(hwnd)?;
     unsafe {
         if EmptyClipboard() == 0 {
@@ -558,7 +571,7 @@ fn run_worker(
             Shell_NotifyIconW(NIM_SETVERSION, &tray);
         }
         let demo = std::env::args().any(|s| s == "--demo");
-        let mut registered = [false; 4];
+        let mut registered = [false; 5];
         if !demo {
             register_hotkeys(hwnd, &settings, &mut registered, &tx);
         }
@@ -567,6 +580,7 @@ fn run_worker(
         let mut secret_sequences = Vec::new();
         let mut restore: Option<(Clip, u32, Instant)> = None;
         let mut preview = Preview::new();
+        let mut selection = selection::Selection::new();
         let mut dirty = false;
         let mut last_sequence = GetClipboardSequenceNumber();
         let mut last_foreground = null_mut();
@@ -611,6 +625,18 @@ fn run_worker(
                     } else {
                         active
                     };
+                    if msg.wParam == 5 {
+                        preview.hide();
+                        pending = None;
+                        if let Err(error) = selection.switch(hwnd, destination, &settings) {
+                            crate::diagnostics::log(&format!("Layout conversion: {error}"));
+                            let _ = tx.send(Event::Error(format!("Layout conversion: {error}")));
+                            ctx.request_repaint();
+                        }
+                        last_sequence = GetClipboardSequenceNumber();
+                        dirty = false;
+                        continue;
+                    }
                     let event = match msg.wParam {
                         1 => Event::Open(executable(destination)),
                         2 => Event::Previous(destination as usize),
@@ -879,7 +905,7 @@ fn run_worker(
 unsafe fn register_hotkeys(
     hwnd: HWND,
     settings: &Settings,
-    registered: &mut [bool; 4],
+    registered: &mut [bool; 5],
     tx: &Sender<Event>,
 ) {
     if let Err(error) = hotkeys::validate(settings) {

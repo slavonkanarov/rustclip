@@ -6,6 +6,7 @@ mod diagnostics;
 mod hotkeys;
 mod i18n;
 mod images;
+mod layouts;
 mod model;
 mod secrets;
 mod supervisor;

@@ -60,12 +60,13 @@ pub fn parse(value: &str) -> Result<Hotkey, String> {
     })
 }
 
-pub fn bindings(settings: &Settings) -> [(i32, &str); 4] {
+pub fn bindings(settings: &Settings) -> [(i32, &str); 5] {
     [
         (1, &settings.hotkey_open),
         (2, &settings.hotkey_previous),
         (3, &settings.hotkey_next),
         (4, &settings.hotkey_plain_paste),
+        (5, &settings.hotkey_layout),
     ]
 }
 

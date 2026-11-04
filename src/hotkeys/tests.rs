@@ -14,3 +14,12 @@ fn rejects_duplicates_and_bare_keys() {
     settings.hotkey_next = "Control + Shift + Up".into();
     assert!(validate(&settings).is_err());
 }
+
+#[test]
+fn selection_shortcut_is_registered_and_validated() {
+    let mut settings = Settings::default();
+    assert_eq!(bindings(&settings)[4], (5, "Ctrl+Shift+T"));
+    assert!(validate(&settings).is_ok());
+    settings.hotkey_layout = settings.hotkey_open.clone();
+    assert!(validate(&settings).is_err());
+}

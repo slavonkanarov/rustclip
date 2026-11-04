@@ -130,10 +130,25 @@ Configure global shortcuts in **Settings → Hotkeys**: click **…** to record 
 | `Ctrl+Shift+D` | Open clipboard history |
 | `Ctrl+Shift+↑` / `↓` | Select an older/newer clip and show a central preview; holding the keys starts cycling after a pause, every 120 ms; optionally paste on release |
 | `Ctrl+Shift+V` | Paste the current clipboard contents as plain text |
+| `Ctrl+Shift+T` | Switch the keyboard layout of selected editable text and keep the result selected; fires on key-down |
 | `Enter` / `Shift+Enter` | Paste the selected clip / paste as plain text, unless focus is in a text field |
 | `F2` / `F4` | Open the clip editor / preferences |
 | `Esc` | Hide the window and central preview |
 | `Alt+X` | Quit while the main window is open |
+
+Choose the two installed Windows keyboard layouts under **Settings → Hotkeys → Selection keyboard layouts** (English/Russian by default).
+For example, `руддщ` becomes `hello`. The last letter determines the source layout, ignoring trailing spaces, digits, and punctuation.
+If both layouts contain that letter, the active layout breaks the tie; repeated conversions of the same selection reverse the previous conversion.
+Ctrl and Shift can stay held while you press T repeatedly. There is no configured paste delay.
+Standard Windows Edit fields are updated directly without touching the clipboard (the entire field is limited to 32 MiB for reading).
+Other editors use Ctrl+Insert to obtain the selection (up to 300 ms), Unicode input to replace it, then move left and select forward with Shift+Right by grapheme; the caret stays at the end. Compatibility depends on the editor's caret behavior.
+The replacement is plain text. Unknown characters are preserved; composed dead-key sequences and IME input are not transliterated.
+The application must support Ctrl+Insert and normal text editing, and must not run with higher privileges than RustClip.
+Temporary copies are not added to RustClip history. For the clipboard-based path, **Restore clipboard after pasting** restores the clipboard; unsupported native/private formats cause an explicit error before editing.
+
+The interactive desktop regression test (requires an unlocked Windows desktop with English and Russian installed) is:
+`cargo test --locked held_hotkey_converts_and_reselects_twice -- --ignored --nocapture`.
+It temporarily focuses a test text field, uses Ctrl+Shift+F24 to avoid conflicts with a running RustClip, exercises both native and clipboard-based conversion with held modifiers, checks the caret at the selection end, and restores the clipboard. The clipboard owner belongs to the calling thread, as in the actual worker.
 
 ### Secrets
 

@@ -63,6 +63,11 @@ fn settings_navigation(
 impl App {
     fn save_preferences(&mut self, ctx: &egui::Context) -> Result<(), String> {
         hotkeys::validate(&self.draft)?;
+        if self.draft.layout_first != self.settings.layout_first
+            || self.draft.layout_second != self.settings.layout_second
+        {
+            crate::layouts::validate(self.draft.layout_first, self.draft.layout_second)?;
+        }
         self.draft.recent_apps = self.settings.recent_apps.clone();
         if self.draft.autostart != self.settings.autostart {
             autostart::set_enabled(self.draft.autostart)?;
@@ -192,6 +197,7 @@ impl App {
                                 (language.text("Previous clip"), &mut self.draft.hotkey_previous),
                                 (language.text("Next clip"), &mut self.draft.hotkey_next),
                                 (language.text("Paste as text"), &mut self.draft.hotkey_plain_paste),
+                                (language.text("Switch selection layout"), &mut self.draft.hotkey_layout),
                             ].into_iter().enumerate() {
                                 ui.label(name);
                                 ui.label(value.as_str());
@@ -209,6 +215,26 @@ impl App {
                             ui.colored_label(egui::Color32::RED, language.message(&error));
                         }
                         ui.checkbox(&mut self.draft.auto_paste,language.text("Paste automatically after Quick Copy"));
+                        ui.separator();
+                        ui.label(language.text("Selection keyboard layouts"));
+                        match crate::layouts::installed() {
+                            Ok(layouts) => {
+                                for (index, value) in [&mut self.draft.layout_first, &mut self.draft.layout_second].into_iter().enumerate() {
+                                    egui::ComboBox::from_id_salt(("selection_layout", index))
+                                        .selected_text(layouts.iter().find(|layout| layout.id == *value).map(|layout| layout.name.clone()).unwrap_or_else(|| format!("{value:08X}")))
+                                        .show_ui(ui, |ui| {
+                                            for layout in &layouts {
+                                                ui.selectable_value(value, layout.id, &layout.name);
+                                            }
+                                        });
+                                }
+                                if let Err(error) = crate::layouts::validate(self.draft.layout_first, self.draft.layout_second) {
+                                    ui.colored_label(egui::Color32::LIGHT_RED, language.message(&error));
+                                }
+                            }
+                            Err(error) => { ui.colored_label(egui::Color32::LIGHT_RED, language.message(&error)); }
+                        }
+                        ui.label(language.text("Detect by the last letter; keep the replacement selected. Works on key press, without releasing modifiers."));
                     },
                     2=>{ui.label(language.text("Maximum number of unstarred clips"));ui.add(egui::DragValue::new(&mut self.draft.limit).speed(1.).range(1..=usize::MAX));ui.label(language.text("Check recent clips for duplicates"));ui.add(egui::DragValue::new(&mut self.draft.duplicates).speed(1.).range(0..=100));ui.checkbox(&mut self.draft.newest_first,language.text("Newest clips first"));},
                     3=>{ui.checkbox(&mut self.draft.ctrl_v,language.text("Emulate Ctrl+V (otherwise Shift+Insert)"));ui.checkbox(&mut self.draft.restore,language.text("Restore clipboard after pasting"));ui.label(language.text("Compatibility delay, ms"));ui.add(egui::DragValue::new(&mut self.draft.paste_delay).speed(1.).range(20..=2000));},
@@ -275,6 +301,7 @@ impl App {
             &mut draft.hotkey_previous,
             &mut draft.hotkey_next,
             &mut draft.hotkey_plain_paste,
+            &mut draft.hotkey_layout,
         ][*index] = value.clone();
         let validation = hotkeys::validate(&draft);
         let mut close = false;

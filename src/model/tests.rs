@@ -19,6 +19,24 @@ fn old_settings_gain_defaults() {
     assert!(!s.autostart);
     assert_eq!(s.paste_delay, 200);
     assert_eq!(s.language, Language::English);
+    assert_eq!(s.hotkey_layout, "Ctrl+Shift+T");
+    assert_eq!(s.layout_first, 0x04090409);
+    assert_eq!(s.layout_second, 0x04190419);
+}
+
+#[test]
+fn layout_settings_survive_roundtrip() {
+    let settings = Settings {
+        hotkey_layout: "Ctrl+Alt+T".into(),
+        layout_first: 0x08090809,
+        layout_second: 0x04070407,
+        ..Settings::default()
+    };
+    let restored: Settings =
+        serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();
+    assert_eq!(restored.hotkey_layout, settings.hotkey_layout);
+    assert_eq!(restored.layout_first, settings.layout_first);
+    assert_eq!(restored.layout_second, settings.layout_second);
 }
 
 #[test]

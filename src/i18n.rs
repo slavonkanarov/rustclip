@@ -53,7 +53,7 @@ impl Language {
         if let Some((prefix, detail)) = message.split_once(": ") {
             let translated = self.text(prefix);
             if translated != prefix {
-                return Cow::Owned(format!("{translated}: {detail}"));
+                return Cow::Owned(format!("{translated}: {}", self.message(detail)));
             }
         }
         if let Some(detail) = message.strip_prefix("Failed to write format ") {
@@ -84,6 +84,16 @@ mod tests {
         assert_eq!(
             Language::Russian.message("Unknown key: F13"),
             "Неизвестная клавиша: F13"
+        );
+    }
+
+    #[test]
+    fn selection_errors_translate_nested_details() {
+        assert_eq!(
+            Language::Russian.message(
+                "Layout conversion: No selected text was copied; select editable text first"
+            ),
+            "Смена раскладки: Выделенный текст не скопирован; сначала выделите редактируемый текст"
         );
     }
 }
