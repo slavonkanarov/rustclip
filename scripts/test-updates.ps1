@@ -43,6 +43,9 @@ foreach ($name in @('settings.json', 'secrets.vault', 'clips/test.json')) {
     }
 }
 # Check the elevated portable branch without requesting privileges for this writable fixture.
+Start-Sleep -Milliseconds 500
+Get-Process | Where-Object { $_.Path -eq $executable } | Stop-Process -Force -ErrorAction SilentlyContinue
+Start-Sleep -Milliseconds 100
 & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$repo/src/updates/install.ps1" -PlanFile $planFile -Elevated
 if ($LASTEXITCODE -ne 0) { throw 'Elevated portable replacement failed' }
 # Simulate a protected folder and verify elevation and the subsequent unelevated restart.
