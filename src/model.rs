@@ -62,6 +62,9 @@ impl Clip {
 pub struct Settings {
     pub language: Language,
     pub autostart: bool,
+    pub check_updates: bool,
+    pub auto_update: bool,
+    pub prerelease_updates: bool,
     pub monitor: bool,
     pub auto_paste: bool,
     pub restore: bool,
@@ -87,6 +90,9 @@ impl Default for Settings {
         Self {
             language: Language::English,
             autostart: false,
+            check_updates: true,
+            auto_update: false,
+            prerelease_updates: false,
             monitor: true,
             auto_paste: true,
             restore: true,

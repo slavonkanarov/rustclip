@@ -17,6 +17,9 @@ fn old_settings_gain_defaults() {
     let s: Settings = serde_json::from_str("{\"monitor\":false}").unwrap();
     assert!(!s.monitor);
     assert!(!s.autostart);
+    assert!(s.check_updates);
+    assert!(!s.auto_update);
+    assert!(!s.prerelease_updates);
     assert_eq!(s.paste_delay, 200);
     assert_eq!(s.language, Language::English);
 }

@@ -91,6 +91,7 @@ impl eframe::App for App {
                 }
             }
         }
+        self.poll_updates(ctx);
         if ctx.input(|i| i.viewport().close_requested()) && !self.quitting {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
             ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
@@ -146,6 +147,28 @@ impl eframe::App for App {
                         .clicked()
                     {
                         self.open_preferences();
+                    }
+                    if let Some(release) = self.updates.available(self.settings.prerelease_updates)
+                        && ui
+                            .button(format!(
+                                "{}: {}",
+                                language.text("Update available"),
+                                release.tag_name
+                            ))
+                            .clicked()
+                    {
+                        self.open_preferences();
+                        self.settings_page = 7;
+                        if let Some(release) =
+                            self.updates.available(self.settings.prerelease_updates)
+                        {
+                            self.updates.selected = self
+                                .updates
+                                .releases
+                                .iter()
+                                .position(|r| r.tag_name == release.tag_name)
+                                .unwrap_or(0);
+                        }
                     }
                 });
             });

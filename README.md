@@ -12,6 +12,14 @@ RustClip targets Windows x64. Building from source requires the Rust MSVC toolch
 
 Get the MSI installer or portable ZIP from [GitHub Releases](https://github.com/slavonkanarov/rustclip/releases). The MSI installs for all users and requires administrator rights; the ZIP runs without installation. Installation does not launch RustClip or enable startup with Windows.
 
+## Updates and older versions
+
+When a newer eligible version is known, an **Update available** button appears next to **Settings** in the main window and opens the Updates page with that version selected. Open **Settings → Updates** to check GitHub Releases and read release notes. Click **Update** to download, verify, install the selected Windows x64 version, and restart in one action, including when choosing an older version. Downloads are checked against the release's SHA-256 sums. Automatic checks run at startup and every six hours; automatic installation is off by default. Click **Save** after changing these settings. Prereleases are optional.
+
+Automatic installation waits until settings and editors are closed. RustClip exits normally, including its supervisor, before a separate helper installs the update and restarts the app. MSI installations require Windows administrator approval. Portable installations replace only the EXE and keep the previous executable as `rustclip.exe.previous`. EXE installations in protected folders, including those created by `install-local.ps1` in Program Files, also request administrator approval when needed; the app restarts without elevation.
+
+Before installation, history files, settings, and the encrypted vault are copied to `Backup/before-update-*` in the data directory. Older versions may not understand newer data formats; backups are not restored automatically. Selecting an older or equal version disables automatic installation. MSI downgrades first download and verify the current version's complete installer for recovery, then uninstall without deleting data and install the selected version. If the current MSI is unavailable in Releases, downgrade is blocked. Installer logs and failures are recorded under `updates/` in the data directory. Cancelling administrator approval restarts the existing version.
+
 ## Run from source
 
 ```powershell
@@ -96,9 +104,9 @@ From the repository root, run:
 .\scripts\install-local.ps1
 ```
 
-The script requests administrator rights, builds a release EXE, installs it with the icon, license, and both READMEs to `C:\Program Files\RustClip`, and creates a Start menu shortcut. If RustClip was installed through MSI, the script removes the old MSI registration before copying files. It updates an existing per-user shortcut and startup entry, and removes an old local copy in `%LOCALAPPDATA%\Programs\RustClip` after installation. WiX and the .NET SDK are not needed. The script does not start RustClip; history, settings, and secrets in `%APPDATA%\RustClip` are kept. Quit RustClip through the tray and rerun the script to update it.
+The script requests administrator rights, builds a release EXE, installs it with the icon, license, and both READMEs to `C:\Program Files\RustClip`, and creates a Start menu shortcut. If RustClip was installed through MSI, the script removes the old MSI registration before copying files. It updates an existing per-user shortcut and startup entry, and removes an old local copy in `%LOCALAPPDATA%\Programs\RustClip` after installation. WiX and the .NET SDK are not needed. The script starts RustClip automatically after a successful installation; history, settings, and secrets in `%APPDATA%\RustClip` are kept. Quit RustClip through the tray and rerun the script to update it.
 
-The first Cargo build may download dependencies. If the tools and dependencies are already available locally, use:
+The local installer increments the patch number of the highest local stable Git tag and adds `-dev` (for example, `v0.1.4` becomes `0.1.5-dev`), using the Cargo.toml version as the base when no stable tags exist. Version selection makes no network requests. The first Cargo build may download dependencies. If the tools and dependencies are already available locally, use:
 
 ```powershell
 .\scripts\install-local.ps1 -Offline

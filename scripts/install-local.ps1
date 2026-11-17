@@ -42,11 +42,27 @@ function Update-UserInstallation {
 Push-Location $repo
 try {
     if (-not $SystemOnly) {
+        $version = git tag --list 'v*' |
+            Where-Object { $_ -match '^v\d+\.\d+\.\d+$' } |
+            ForEach-Object { [version]$_.Substring(1) } |
+            Sort-Object -Descending | Select-Object -First 1
+        if (-not $version) {
+            $metadata = cargo metadata --no-deps --format-version 1 --locked --offline | ConvertFrom-Json
+            if ($LASTEXITCODE -ne 0) { throw 'cargo metadata failed' }
+            $version = [version]($metadata.packages | Where-Object name -eq 'rustclip').version
+        }
         $buildArgs = @('build', '--release', '--locked', '--target', 'x86_64-pc-windows-msvc', '--target-dir', "$repo\target")
         if ($Offline) { $buildArgs += '--offline' }
-        & cargo +stable-x86_64-pc-windows-msvc @buildArgs
-        if ($LASTEXITCODE -ne 0) {
-            throw 'Build failed. Rust MSVC and Visual Studio C++ Build Tools with the Windows SDK are required.'
+        $previousBuildVersion = $env:RUSTCLIP_BUILD_VERSION
+        try {
+            $env:RUSTCLIP_BUILD_VERSION = "$($version.Major).$($version.Minor).$($version.Build + 1)-dev"
+            Write-Host "Building RustClip $env:RUSTCLIP_BUILD_VERSION"
+            & cargo +stable-x86_64-pc-windows-msvc @buildArgs
+            if ($LASTEXITCODE -ne 0) {
+                throw 'Build failed. Rust MSVC and Visual Studio C++ Build Tools with the Windows SDK are required.'
+            }
+        } finally {
+            $env:RUSTCLIP_BUILD_VERSION = $previousBuildVersion
         }
     }
 
@@ -69,6 +85,7 @@ try {
             throw "Elevated installation failed with exit code $($elevated.ExitCode). Run PowerShell as Administrator to see the error."
         }
         Update-UserInstallation
+        Start-Process -FilePath $executable -WorkingDirectory $installDir -WindowStyle Hidden
         return
     }
 
@@ -107,7 +124,10 @@ try {
     $shortcut.IconLocation = "$(Join-Path $installDir 'icon.ico'),0"
     $shortcut.Description = 'Clipboard history and encrypted secrets'
     $shortcut.Save()
-    if (-not $SystemOnly) { Update-UserInstallation }
+    if (-not $SystemOnly) {
+        Update-UserInstallation
+        (New-Object -ComObject Shell.Application).ShellExecute($executable, '', $installDir, 'open', 1)
+    }
 } finally {
     Pop-Location
 }

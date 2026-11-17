@@ -9,6 +9,7 @@ mod images;
 mod model;
 mod secrets;
 mod supervisor;
+mod updates;
 
 use app::App;
 use eframe::egui;

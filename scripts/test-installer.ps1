@@ -70,6 +70,29 @@ try {
     $registrations = @(Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*' -ErrorAction SilentlyContinue |
         Where-Object DisplayName -eq 'RustClip')
     if ($registrations.Count -ne 1) { throw "Expected one RustClip installation, found $($registrations.Count)" }
+    $planFile = Join-Path $testDir 'update.json'
+    $updatePlan = @{
+        product = $registrations[0].PSChildName; downgrade = $true
+        package = $previous; sha256 = (Get-FileHash -LiteralPath $previous).Hash
+        recovery = @{ package = $msi; sha256 = (Get-FileHash -LiteralPath $msi).Hash }
+    }
+    $updatePlan | ConvertTo-Json | Set-Content -LiteralPath $planFile -Encoding UTF8
+    & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$repo/src/updates/install.ps1" -PlanFile $planFile -Elevated
+    if ($LASTEXITCODE -ne 0) { throw 'MSI updater downgrade failed' }
+    Assert-DataPreserved
+    $installed = @(Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*' -ErrorAction SilentlyContinue |
+        Where-Object DisplayName -eq 'RustClip')
+    if ($installed.Count -ne 1) { throw 'Downgrade left an unexpected number of installations' }
+    $invalid = Join-Path $testDir 'invalid.msi'
+    Set-Content -LiteralPath $invalid -Value 'invalid MSI fixture'
+    $updatePlan.product = $installed[0].PSChildName
+    $updatePlan.package = $invalid
+    $updatePlan.sha256 = (Get-FileHash -LiteralPath $invalid).Hash
+    $updatePlan | ConvertTo-Json | Set-Content -LiteralPath $planFile -Encoding UTF8
+    & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$repo/src/updates/install.ps1" -PlanFile $planFile -Elevated
+    if ($LASTEXITCODE -ne 1) { throw 'Invalid MSI was accepted' }
+    if (-not (Test-Path -LiteralPath "$installDir/rustclip.exe")) { throw 'MSI recovery did not restore the executable' }
+    Assert-DataPreserved
 } finally {
     Invoke-Msi "/x `"$msi`"" 'uninstall'
 }
