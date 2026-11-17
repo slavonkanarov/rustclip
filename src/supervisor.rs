@@ -19,9 +19,6 @@ pub fn run() -> io::Result<()> {
     loop {
         let mut command = Command::new(&executable);
         command.args(&args).arg("--internal-run");
-        if retries > 0 && !crate::diagnostics::safe_mode() {
-            command.arg("--safe-mode");
-        }
         let started = Instant::now();
         let mut child = command.spawn()?;
         crate::diagnostics::log(&format!("Application process started pid={}", child.id()));
@@ -39,7 +36,7 @@ pub fn run() -> io::Result<()> {
                 "Repeated crashes; automatic restart stopped. See runtime.log and crash.log.",
             )
         })?;
-        crate::diagnostics::log(&format!("Restarting in safe mode (attempt {retries})"));
+        crate::diagnostics::log(&format!("Restarting application (attempt {retries})"));
         std::thread::sleep(Duration::from_secs(1));
     }
 }
