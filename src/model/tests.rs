@@ -17,6 +17,9 @@ fn old_settings_gain_defaults() {
     let s: Settings = serde_json::from_str("{\"monitor\":false}").unwrap();
     assert!(!s.monitor);
     assert!(!s.autostart);
+    assert!(s.check_updates);
+    assert!(!s.auto_update);
+    assert!(!s.prerelease_updates);
     assert_eq!(s.paste_delay, 200);
     assert_eq!(s.language, Language::English);
 }
@@ -44,6 +47,27 @@ fn settings_can_be_saved_again() {
     let saved: Settings = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
     assert_eq!(saved.excluded_hotkeys, "Code.exe");
     assert!(saved.autostart);
+    fs::remove_file(path).unwrap();
+}
+
+#[test]
+fn image_clip_save_flushes_all_buffered_bytes() {
+    let path = std::env::temp_dir().join(format!(
+        "rustclip-image-save-test-{}.json",
+        std::process::id()
+    ));
+    let clip = Clip {
+        id: 1,
+        formats: vec![("PNG".into(), (0..=255).cycle().take(1024 * 1024).collect())],
+        png: include_bytes!("../../assets/icon.png").to_vec(),
+        ..Default::default()
+    };
+    write_json(&path, &clip).unwrap();
+    let saved: Clip = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    assert_eq!(saved.id, clip.id);
+    assert_eq!(saved.formats, clip.formats);
+    assert_eq!(saved.png, clip.png);
+    assert!(!path.with_extension("tmp").exists());
     fs::remove_file(path).unwrap();
 }
 

@@ -2,7 +2,7 @@ use crate::i18n::Language;
 use serde::{Deserialize, Serialize};
 use std::{
     fs,
-    io::Read,
+    io::{BufWriter, Read, Write},
     os::windows::ffi::OsStrExt,
     path::PathBuf,
     time::{SystemTime, UNIX_EPOCH},
@@ -62,6 +62,9 @@ impl Clip {
 pub struct Settings {
     pub language: Language,
     pub autostart: bool,
+    pub check_updates: bool,
+    pub auto_update: bool,
+    pub prerelease_updates: bool,
     pub monitor: bool,
     pub auto_paste: bool,
     pub restore: bool,
@@ -87,6 +90,9 @@ impl Default for Settings {
         Self {
             language: Language::English,
             autostart: false,
+            check_updates: true,
+            auto_update: false,
+            prerelease_updates: false,
             monitor: true,
             auto_paste: true,
             restore: true,
@@ -191,9 +197,10 @@ fn read_json<T: serde::de::DeserializeOwned>(
 pub fn write_json(path: &std::path::Path, value: &impl Serialize) -> Result<(), String> {
     fs::create_dir_all(path.parent().ok_or("No parent directory")?).map_err(|e| e.to_string())?;
     let temp = path.with_extension("tmp");
-    let mut file = fs::File::create(&temp).map_err(|e| e.to_string())?;
+    let mut file = BufWriter::new(fs::File::create(&temp).map_err(|e| e.to_string())?);
     serde_json::to_writer(&mut file, value).map_err(|e| e.to_string())?;
-    file.sync_all().map_err(|e| e.to_string())?;
+    file.flush().map_err(|e| e.to_string())?;
+    file.get_ref().sync_all().map_err(|e| e.to_string())?;
     drop(file);
     use windows_sys::Win32::Storage::FileSystem::{
         MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW,

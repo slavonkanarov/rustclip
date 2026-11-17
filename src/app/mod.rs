@@ -1,5 +1,6 @@
 mod preferences;
 mod ui;
+mod updates;
 mod vault;
 mod widgets;
 
@@ -53,6 +54,7 @@ pub(crate) struct App {
     status: String,
     texture: Option<(u128, u32, Result<egui::TextureHandle, String>)>,
     quitting: bool,
+    updates: crate::updates::Updates,
 }
 
 impl App {
@@ -172,6 +174,7 @@ impl App {
             status: errors.join("\n"),
             texture: None,
             quitting: false,
+            updates: crate::updates::Updates::default(),
         }
     }
     fn send(&mut self, command: Command) {

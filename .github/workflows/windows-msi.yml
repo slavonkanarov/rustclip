@@ -81,6 +81,9 @@ jobs:
       - name: Run Rust tests
         run: cargo test --locked --target x86_64-pc-windows-msvc
 
+      - name: Verify portable updater
+        run: ./scripts/test-updates.ps1
+
       - name: Build Windows executable
         run: cargo build --locked --release --target x86_64-pc-windows-msvc
 

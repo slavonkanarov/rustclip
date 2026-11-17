@@ -9,7 +9,7 @@ use zeroize::Zeroize;
 #[cfg(test)]
 mod tests;
 
-const SETTINGS_PAGES: [&str; 7] = [
+const SETTINGS_PAGES: [&str; 8] = [
     "General",
     "Hotkeys",
     "History",
@@ -17,8 +17,9 @@ const SETTINGS_PAGES: [&str; 7] = [
     "Advanced",
     "Filtering",
     "Secrets",
+    "Updates",
 ];
-const SETTINGS_HINTS: [&str; 7] = [
+const SETTINGS_HINTS: [&str; 8] = [
     "Clip capture and window behavior.",
     "Quick access to history and pasting from any application.",
     "Order, storage size, and duplicate clips.",
@@ -26,6 +27,7 @@ const SETTINGS_HINTS: [&str; 7] = [
     "Central preview and text size limits.",
     "Choose applications and formats to skip.",
     "Protection and access to the encrypted vault.",
+    "GitHub releases, automatic updates, and older versions.",
 ];
 
 fn settings_navigation(
@@ -223,7 +225,8 @@ impl App {
                         ui.text_edit_multiline(&mut self.draft.excluded_formats);
                         ui.label(language.text("Common problematic formats are excluded by default; only supported formats are read."));
                     }
-                    _=>self.setup_secrets_ui(ui),
+                    6=>self.setup_secrets_ui(ui),
+                    _=>self.updates_ui(ui),
                 } });
             });
             });
