@@ -43,8 +43,14 @@ foreach ($name in @('settings.json', 'secrets.vault', 'clips/test.json')) {
     }
 }
 # Check the elevated portable branch without requesting privileges for this writable fixture.
+$elevatedExecutable = Join-Path $folder 'elevated.exe'
+Copy-Item -LiteralPath "$env:SystemRoot\System32\where.exe" -Destination $elevatedExecutable
+$plan.executable = $elevatedExecutable
+$plan.application = $null
+$plan | ConvertTo-Json | Set-Content -LiteralPath $planFile -Encoding UTF8
 & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$repo/src/updates/install.ps1" -PlanFile $planFile -Elevated
-if ($LASTEXITCODE -ne 0) { throw 'Elevated portable replacement failed' }
+if ($LASTEXITCODE -ne 0) { throw "Elevated portable replacement failed; see $folder" }
+if ((Get-FileHash -LiteralPath $elevatedExecutable).Hash -ne $plan.sha256) { throw 'Elevated portable EXE was not replaced' }
 # Simulate a protected folder and verify elevation and the subsequent unelevated restart.
 $elevationTest = Join-Path $folder 'test-elevation.ps1'
 @'
@@ -74,10 +80,8 @@ function Start-Process {
 . $Helper -PlanFile $PlanFile
 if (-not $script:elevated -or -not $script:restarted) { throw 'Protected portable update did not elevate and restart' }
 '@ | Set-Content -LiteralPath $elevationTest -Encoding ASCII
-$plan.application = $null
-$plan | ConvertTo-Json | Set-Content -LiteralPath $planFile -Encoding UTF8
 & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $elevationTest -PlanFile $planFile -Helper "$repo/src/updates/install.ps1"
-if ($LASTEXITCODE -ne 0) { throw 'Protected portable update regression test failed' }
+if ($LASTEXITCODE -ne 0) { throw "Protected portable update regression test failed; see $folder" }
 # Exercise checksum failure without elevation or a real MSI installation.
 $plan.sha256 = '0' * 64
 $plan | ConvertTo-Json | Set-Content -LiteralPath $planFile -Encoding UTF8
