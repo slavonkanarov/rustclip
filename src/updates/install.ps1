@@ -3,8 +3,22 @@ $ErrorActionPreference = 'Stop'
 $plan = Get-Content -LiteralPath $PlanFile -Raw -Encoding UTF8 | ConvertFrom-Json
 $folder = Split-Path -Parent $PlanFile
 
+function Get-Sha256([string]$Path) {
+    $algorithm = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $stream = [System.IO.File]::OpenRead($Path)
+        try {
+            return [System.BitConverter]::ToString($algorithm.ComputeHash($stream)).Replace('-', '')
+        } finally {
+            $stream.Dispose()
+        }
+    } finally {
+        $algorithm.Dispose()
+    }
+}
+
 function Assert-Package {
-    if ((Get-FileHash -LiteralPath $plan.package -Algorithm SHA256).Hash -ne $plan.sha256) {
+    if ((Get-Sha256 $plan.package) -ne $plan.sha256) {
         throw 'Update package SHA-256 mismatch'
     }
 }
@@ -43,7 +57,7 @@ if ($Elevated) {
         $rollback = $null
         if ($plan.downgrade) {
             # Download and verify the complete current MSI before removing anything.
-            if (-not $plan.recovery -or (Get-FileHash -LiteralPath $plan.recovery.package -Algorithm SHA256).Hash -ne $plan.recovery.sha256) {
+            if (-not $plan.recovery -or (Get-Sha256 $plan.recovery.package) -ne $plan.recovery.sha256) {
                 throw 'Verified recovery MSI is required for downgrade'
             }
             $rollback = $plan.recovery.package
