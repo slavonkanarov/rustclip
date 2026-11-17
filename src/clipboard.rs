@@ -308,11 +308,15 @@ fn capture_inner(hwnd: HWND, settings: &Settings, allow_own: bool) -> Result<Opt
     {
         let buffer = crate::images::decode(bytes, name != "PNG")
             .map_err(|e| format!("Clipboard image ({name}, {} bytes): {e}", bytes.len()))?;
-        let mut cursor = std::io::Cursor::new(Vec::new());
-        buffer
-            .write_to(&mut cursor, image::ImageFormat::Png)
-            .map_err(|e| e.to_string())?;
-        clip.png = cursor.into_inner();
+        if name == "PNG" {
+            clip.png = bytes.clone();
+        } else {
+            let mut cursor = std::io::Cursor::new(Vec::new());
+            buffer
+                .write_to(&mut cursor, image::ImageFormat::Png)
+                .map_err(|e| e.to_string())?;
+            clip.png = cursor.into_inner();
+        }
     }
     if unsafe { GetClipboardSequenceNumber() } != sequence {
         return Ok(None);

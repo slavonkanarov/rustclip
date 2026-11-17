@@ -34,7 +34,7 @@ function Wait-Application([int]$ParentId, [int]$PreviousId = 0) {
             $script:appWindow = [IntPtr]::Zero
             [RustClipRecoveryTest]::EnumWindows({
                 param($handle, $unused)
-                $owner = 0u
+                [uint32]$owner = 0
                 [void][RustClipRecoveryTest]::GetWindowThreadProcessId($handle, [ref]$owner)
                 $title = [Text.StringBuilder]::new(512)
                 [void][RustClipRecoveryTest]::GetWindowText($handle, $title, 512)
@@ -61,19 +61,23 @@ try {
     $env:RUSTCLIP_DATA_DIR = $data
     New-Item -ItemType Directory -Path (Join-Path $data 'clips') | Out-Null
     [IO.File]::WriteAllText((Join-Path $data 'clips\1.json'), '{broken')
-    $supervisor = Start-Process -FilePath $executablePath -ArgumentList '--demo' -PassThru
+    $supervisor = Start-Process -FilePath $executablePath -ArgumentList '--demo' -WindowStyle Hidden -PassThru
     $first = Wait-Application $supervisor.Id
-    Stop-Process -Id ([int]$first.ProcessId) -Force
-    $restarted = Wait-Application $supervisor.Id ([int]$first.ProcessId)
-    if ($restarted.CommandLine -notmatch '--safe-mode') { throw 'Restart did not enable safe mode' }
+    foreach ($attempt in 1..2) {
+        Stop-Process -Id ([int]$first.ProcessId) -Force
+        $restarted = Wait-Application $supervisor.Id ([int]$first.ProcessId)
+        if ($restarted.CommandLine -match '--safe-mode') { throw 'Restart disabled normal application features' }
+        $first = $restarted
+    }
     $log = Get-Content -LiteralPath (Join-Path $data 'runtime.log') -Raw
-    foreach ($expected in @('Application crashed:', 'Restarting in safe mode', 'safe_mode=true', '1.json')) {
+    foreach ($expected in @('Application crashed:', 'Restarting application (attempt 1)', 'Restarting application (attempt 2)', 'safe_mode=false', '1.json')) {
         if (-not $log.Contains($expected)) { throw "Missing diagnostic record: $expected" }
     }
+    if ($log.Contains('safe_mode=true')) { throw 'Recovery enabled safe mode' }
     if (-not (Test-Path -LiteralPath (Join-Path $data 'clips\1.json'))) {
         throw 'Corrupt history file was deleted'
     }
-    Write-Host 'PASS: native process termination logged; responsive UI restarted in safe mode; corrupt clip preserved.'
+    Write-Host 'PASS: two native process terminations logged; responsive UI restarted in normal mode each time; corrupt clip preserved.'
 } finally {
     if ($supervisor) {
         # Stop the supervisor first so test cleanup cannot trigger another restart.

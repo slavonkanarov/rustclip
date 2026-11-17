@@ -33,9 +33,9 @@ To start RustClip when you sign in, enable **Settings → General → Start when
 ### Crash recovery and diagnostics
 
 RustClip supervises its UI process and restarts it after an abnormal exit, including native crashes.
-After a crash it uses safe mode: image decoding/previews are disabled and dialogs are embedded in
-the main window to avoid multi-window OpenGL context failures. You can also pass `--safe-mode`
-manually. Quit and launch again to return to normal mode. There are at most three automatic
+After a crash it restarts in normal mode with image capture, previews, and dialogs enabled.
+Safe mode is available only when explicitly requested with `--safe-mode`: image decoding/previews
+are disabled and dialogs use the main window. There are at most three automatic
 restarts after consecutive failures; five minutes of uptime resets the retry budget. Unsaved edits
 are not recovered; saved history and the encrypted vault remain on disk and the vault is locked.
 
