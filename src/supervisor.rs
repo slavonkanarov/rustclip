@@ -19,6 +19,7 @@ pub fn run() -> io::Result<()> {
     loop {
         let mut command = Command::new(&executable);
         command.args(&args).arg("--internal-run");
+        command.env("RUSTCLIP_SUPERVISOR_PID", std::process::id().to_string());
         let started = Instant::now();
         let mut child = command.spawn()?;
         crate::diagnostics::log(&format!("Application process started pid={}", child.id()));
