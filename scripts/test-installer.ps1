@@ -6,6 +6,7 @@ if ($env:GITHUB_ACTIONS -ne 'true') {
     throw 'Run installation/removal tests only on a disposable GitHub Actions runner.'
 }
 $repo = (Resolve-Path "$PSScriptRoot/..").Path
+$helper = Join-Path $repo 'src\updates\install.ps1'
 $package = @(Get-ChildItem "$repo/target/package/*.msi" -File)
 if ($package.Count -ne 1) { throw 'Expected exactly one MSI package' }
 $msi = $package[0].FullName
@@ -77,8 +78,8 @@ try {
         recovery = @{ package = $msi; sha256 = (Get-FileHash -LiteralPath $msi).Hash }
     }
     $updatePlan | ConvertTo-Json | Set-Content -LiteralPath $planFile -Encoding UTF8
-    & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$repo/src/updates/install.ps1" -PlanFile $planFile -Elevated
-    if ($LASTEXITCODE -ne 0) { throw 'MSI updater downgrade failed' }
+    & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $helper -PlanFile $planFile -Elevated
+    if ($LASTEXITCODE -ne 0) { throw "MSI updater downgrade failed; see $testDir" }
     Assert-DataPreserved
     $installed = @(Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*' -ErrorAction SilentlyContinue |
         Where-Object DisplayName -eq 'RustClip')
@@ -89,8 +90,12 @@ try {
     $updatePlan.package = $invalid
     $updatePlan.sha256 = (Get-FileHash -LiteralPath $invalid).Hash
     $updatePlan | ConvertTo-Json | Set-Content -LiteralPath $planFile -Encoding UTF8
-    & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$repo/src/updates/install.ps1" -PlanFile $planFile -Elevated
-    if ($LASTEXITCODE -ne 1) { throw 'Invalid MSI was accepted' }
+    # Capture the expected failure without setting the CI shell's $LASTEXITCODE.
+    $failure = Start-Process powershell.exe -ArgumentList "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$helper`" -PlanFile `"$planFile`" -Elevated" -WindowStyle Hidden -Wait -PassThru
+    if ($failure.ExitCode -ne 1) { throw "Expected invalid MSI to fail with exit code 1, got $($failure.ExitCode); see $testDir" }
+    if ((Get-Content -LiteralPath (Join-Path $testDir 'error.txt') -Raw) -notmatch 'Windows Installer failed:') {
+        throw "Expected Windows Installer to reject the invalid MSI; see $testDir"
+    }
     if (-not (Test-Path -LiteralPath "$installDir/rustclip.exe")) { throw 'MSI recovery did not restore the executable' }
     Assert-DataPreserved
 } finally {
@@ -104,3 +109,4 @@ Invoke-Msi "/x `"$msi`" DELETEUSERDATA=1" 'uninstall-with-data'
 if (Get-ChildItem -LiteralPath $dataDir -File -Recurse -Force -ErrorAction SilentlyContinue) {
     throw 'Explicit data removal left RustClip data behind'
 }
+Write-Host "MSI installation, upgrade, downgrade, recovery, and removal passed: $testDir"

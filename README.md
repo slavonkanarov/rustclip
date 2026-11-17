@@ -66,6 +66,8 @@ building the MSVC release executable. The test stops only its own processes and 
 
 The [Windows MSI workflow](.github/workflows/windows-msi.yml) runs on pushes to `dev`, `release`, and `main`; on `v*` tags; on pull requests to those branches; and manually from **Actions → Windows MSI → Run workflow**. It checks formatting and tests, builds a Windows x64 EXE and MSI, then tests installation, upgrades, and removal. Builds use MSVC with a statically linked CRT.
 
+The workflow uses standard GitHub-hosted runners and keeps updater and installer failure logs, when available, in the `windows-test-logs` artifact for 7 days.
+
 Successful workflow runs provide the `rustclip-windows-x64` Actions artifact for 90 days:
 
 - `RustClip-<version>-x64.msi`: installer with a license screen, installation to `C:\Program Files\RustClip`, and a Start menu shortcut; requires administrator rights.
