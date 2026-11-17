@@ -85,3 +85,4 @@ $plan | ConvertTo-Json | Set-Content -LiteralPath $planFile -Encoding UTF8
 if ($LASTEXITCODE -ne 1) { throw 'Invalid checksum was accepted' }
 if ((Get-Content -LiteralPath "$folder/error.txt" -Raw) -notmatch 'SHA-256 mismatch') { throw 'Expected checksum error' }
 Write-Host "Portable replacement, elevation fallback, unelevated restart, backup, and checksum rejection passed: $folder"
+exit 0
